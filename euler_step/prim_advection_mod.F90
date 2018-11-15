@@ -917,10 +917,10 @@ contains
     call initEdgeBuffer(par,edgeAdv1,elem,nlev)
     call initEdgeBuffer(par,edgeveloc,elem,2*nlev)
 
-    ! This is a different type of buffer pointer allocation 
-    ! used for determine the minimum and maximum value from 
+    ! This is a different type of buffer pointer allocation
+    ! used for determine the minimum and maximum value from
     ! neighboring  elements
-    call initEdgeSBuffer(par,edgeAdvQminmax,elem,qsize*nlev*2) 
+    call initEdgeSBuffer(par,edgeAdvQminmax,elem,qsize*nlev*2)
 
     ! Don't actually want these saved, if this is ever called twice.
     nullify(buf_ptr)
@@ -987,7 +987,7 @@ contains
     !
     ! spelt%v0:      velocity at beginning of tracer timestep (time n0_qdp)
     !                this was saved before the (possibly many) dynamics steps
-    ! elem%derived%vstar:    
+    ! elem%derived%vstar:
     !                velocity at end of tracer timestep (time np1 = np1_qdp)
     !                for lagrangian dynamics, this is on lagrangian levels
     !                for eulerian dynamcis, this is on reference levels
@@ -1109,7 +1109,7 @@ contains
     !
     ! fvm%v0:        velocity at beginning of tracer timestep (time n0_qdp)
     !                this was saved before the (possibly many) dynamics steps
-    ! elem%derived%vstar:    
+    ! elem%derived%vstar:
     !                velocity at end of tracer timestep (time np1 = np1_qdp)
     !                for lagrangian dynamics, this is on lagrangian levels
     !                for eulerian dynamcis, this is on reference levels
@@ -1161,8 +1161,8 @@ contains
        end do
     else
        ! do nothing
-       ! for rsplit>0:  dynamics is also vertically lagrangian, so we do not need 
-       ! to interpolate v(np1). 
+       ! for rsplit>0:  dynamics is also vertically lagrangian, so we do not need
+       ! to interpolate v(np1).
     endif
 
 
@@ -1178,7 +1178,7 @@ contains
 !     call t_stopf('fvm_depalg')
 
 !------------------------------------------------------------------------------------
-    
+
     ! fvm departure calcluation should use vstar.
     ! from c(n0) compute c(np1):
     if (tracer_transport_type == TRACERTRANSPORT_FLUXFORM_FVM) then
@@ -1413,7 +1413,7 @@ subroutine VDOT(rp,Que,rho,mass,hybrid,nets,nete)
 
   integer                                       :: k,n,q,ie
 
-  global_shared_buf = 0 
+  global_shared_buf = 0
   do ie=nets,nete
     n=0
     do q=1,qsize
@@ -1433,10 +1433,10 @@ subroutine VDOT(rp,Que,rho,mass,hybrid,nets,nete)
     rp(k,q) = global_shared_sum(n) - mass(k,q)
   enddo
   enddo
-  
+
 end subroutine VDOT
 
-subroutine Cobra_SLBQP(Que, Que_t, rho, minq, maxq, mass, hybrid, nets, nete) 
+subroutine Cobra_SLBQP(Que, Que_t, rho, minq, maxq, mass, hybrid, nets, nete)
 
   use parallel_mod,        only: global_shared_buf, global_shared_sum
   use global_norms_mod,    only: wrap_repro_sum
@@ -1453,8 +1453,8 @@ subroutine Cobra_SLBQP(Que, Que_t, rho, minq, maxq, mass, hybrid, nets, nete)
   type (hybrid_t)     , intent(in)              :: hybrid
 
   integer,                            parameter :: max_clip = 100
-  real(kind=real_kind),               parameter :: eta = 1D-12           
-  real(kind=real_kind),               parameter :: hfd = 1D-12             
+  real(kind=real_kind),               parameter :: eta = 1D-12
+  real(kind=real_kind),               parameter :: hfd = 1D-12
   real(kind=real_kind)                          :: lambda_p          (nlev,qsize)
   real(kind=real_kind)                          :: lambda_c          (nlev,qsize)
   real(kind=real_kind)                          :: rp                (nlev,qsize)
@@ -1488,10 +1488,10 @@ subroutine Cobra_SLBQP(Que, Que_t, rho, minq, maxq, mass, hybrid, nets, nete)
   call VDOT(rc,Que,rho,mass,hybrid,nets,nete)
 
   rd = rc-rp
-  if (MAXVAL(ABS(rd)).eq.0) return 
-  
+  if (MAXVAL(ABS(rd)).eq.0) return
+
   alpha = 0
-  WHERE (rd.ne.0) alpha = hfd / rd 
+  WHERE (rd.ne.0) alpha = hfd / rd
 
   lambda_p = 0
   lambda_c =  -alpha*rp
@@ -1515,7 +1515,7 @@ subroutine Cobra_SLBQP(Que, Que_t, rho, minq, maxq, mass, hybrid, nets, nete)
     if (MAXVAL(ABS(rd)).eq.0) exit
 
     alpha = 0
-    WHERE (rd.ne.0) alpha = (lambda_p - lambda_c) / rd 
+    WHERE (rd.ne.0) alpha = (lambda_p - lambda_c) / rd
 
     rp       = rc
     lambda_p = lambda_c
@@ -1963,7 +1963,7 @@ end subroutine ALE_parametric_coords
   qbeg = 1
   qend = qsize
   kbeg = 1
-  kend = nlev 
+  kend = nlev
 
   rhs_viss = 0
   if ( limiter_option == 8  ) then
@@ -2043,7 +2043,7 @@ end subroutine ALE_parametric_coords
       ! nu_p>0):   qtens_biharmonc *= elem()%psdiss_ave      (for consistency, if nu_p=nu_q)
       if ( nu_p > 0 ) then
         do ie = nets , nete
-          do k = 1 , nlev 
+          do k = 1 , nlev
             do j=1,np
               do i=1,np
                 dpdiss(i,j) = elem(ie)%derived%dpdiss_ave(i,j,k)
@@ -2060,7 +2060,7 @@ end subroutine ALE_parametric_coords
           enddo
         enddo
       endif
-#ifdef OVERLAP 
+#ifdef OVERLAP
       call neighbor_minmax_start(hybrid,edgeAdvQminmax,nets,nete,qmin(:,:,nets:nete),qmax(:,:,nets:nete))
       call biharmonic_wk_scalar(elem,qtens_biharmonic,deriv,edgeAdv,hybrid,nets,nete)
       do ie = nets, nete
@@ -2103,7 +2103,7 @@ end subroutine ALE_parametric_coords
 !      call biharmonic_wk_scalar_minmax( elem , qtens_biharmonic , deriv , edgeAdvQ3 , hybrid , &
 !           nets , nete , qmin(:,:,nets:nete) , qmax(:,:,nets:nete) )
 !      do ie = nets , nete
-!        do k = 1 , nlev 
+!        do k = 1 , nlev
 !          do q = 1 , qsize
 !            ! note: biharmonic_wk() output has mass matrix already applied. Un-apply since we apply again below:
 !            do j=1,np
@@ -2222,8 +2222,8 @@ end subroutine ALE_parametric_coords
       call edgeVpack(edgeAdvp1  , elem(ie)%state%Qdp(:,:,:,q,np1_qdp) , nlev , kptr , ie )
 
      enddo
-   
-      
+
+
      if ( DSSopt == DSSeta         ) DSSvar => elem(ie)%derived%eta_dot_dpdn(:,:,:)
      if ( DSSopt == DSSomega       ) DSSvar => elem(ie)%derived%omega_p(:,:,:)
      if ( DSSopt == DSSdiv_vdp_ave ) DSSvar => elem(ie)%derived%divdp_proj(:,:,:)
@@ -2235,7 +2235,7 @@ end subroutine ALE_parametric_coords
           enddo
        enddo
      enddo
-    
+
      kptr = nlev*qsize
      call edgeVpack( edgeAdvp1 , DSSvar(:,:,1:nlev) , nlev , kptr , ie )
   enddo
@@ -2639,7 +2639,7 @@ end subroutine ALE_parametric_coords
 
 #ifdef LIMITER_REWRITE_OPT
   subroutine limiter_optim_iter_full(ptens,sphweights,minp,maxp,dpmass)
-    ! 
+    !
     !The idea here is the following: We need to find a grid field which is closest
     !to the initial field (in terms of weighted sum), but satisfies the min/max constraints.
     !So, first we find values which do not satisfy constraints and bring these values
@@ -2648,8 +2648,8 @@ end subroutine ALE_parametric_coords
     !This redistribution might violate constraints thus, we do a few iterations.
     !
     ! O. Guba ~2012                    Documented in Guba, Taylor & St-Cyr, JCP 2014
-    ! I. Demeshko & M. Taylor 7/2015:  Removed indirect addressing.  
-    ! N. Lopez & M. Taylor 8/2015:     Mass redistributon tweak which is better at 
+    ! I. Demeshko & M. Taylor 7/2015:  Removed indirect addressing.
+    ! N. Lopez & M. Taylor 8/2015:     Mass redistributon tweak which is better at
     !                                  linear coorelation preservation
     !
     use kinds         , only : real_kind
@@ -2749,7 +2749,7 @@ end subroutine ALE_parametric_coords
       ptens(k1,k)=ptens(k1,k)*dpmass(k1,k)
     enddo
   enddo
- 
+
   end subroutine limiter_optim_iter_full
 #endif
 

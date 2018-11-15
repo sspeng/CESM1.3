@@ -135,7 +135,7 @@ implicit none
   do i = 1, 5
     call counter(count)
   enddo
-  print *, count
+  !print *, count
 end program main
 
 subroutine euler_step( np1_qdp , n0_qdp , dt , elem , hvcoord , hybrid , deriv , nets , nete , DSSopt , rhs_multiplier )
@@ -203,257 +203,18 @@ implicit none
       integer :: nets, nete
     end subroutine biharmonic_wk_scalar
   end interface
-!#define QMAX
-!#ifdef QMAX
-external :: slave_update_qdp
-type param_qdp_t
-  integer*8 :: Qdp, Qtens_temp, spheremp
-  integer :: nets, nete, qsize, qsize_d, step_elem
-end type param_qdp_t
-type(param_qdp_t) :: param_qdp_s
-do ie=nets,nete
-  do q=1,qsize
-    do k=1,nlev
-      do j=1,np
-        do i=1,np
-          !print *, elem(ie)%state%Qdp(i,j,k,q,np1_qdp)
-          Qtens_temp(i,j,k,q,ie) = 1
-        enddo
-      enddo
-    enddo
-  enddo
-enddo
-do k = 1, nlev
-  dp0(k) = 1
-enddo
-param_qdp_s%Qdp = loc(elem(nets)%state%Qdp(1,1,1,1,np1_qdp))
-param_qdp_s%spheremp = loc(elem(nets)%spheremp)
-param_qdp_s%Qtens_temp = loc(Qtens_temp(1,1,1,1,nets))
-param_qdp_s%nets = nets
-param_qdp_s%nete = nete
-param_qdp_s%qsize = qsize
-param_qdp_s%qsize_d = qsize_d
-param_qdp_s%step_elem = (loc(elem(nets+1)%spheremp) - loc(elem(nets)%spheremp))/8
-call athread_spawn(slave_update_qdp, param_qdp_s)
-call athread_join()
-!external :: slave_compute_overlap
-!type param_compute_t
-!  integer*8 :: Qtens_biharmonic, spheremp, dp0
-!  real(kind=real_kind) :: dt, nu_q
-!  integer :: nets, nete, qsize, step_elem, rhs_viss
-!end type param_compute_t
-!type(param_compute_t) :: param_compute_s
-!do ie=nets,nete
-!  do q=1,qsize
-!    do k=1,nlev
-!      do j=1,np
-!        do i=1,np
-!          !print *, elem(ie)%state%Qdp(i,j,k,q,np1_qdp)
-!          Qtens_biharmonic(i,j,k,q,ie) = 1
-!        enddo
-!      enddo
-!    enddo
-!  enddo
-!enddo
-!do k = 1, nlev
-!  dp0(k) = 1
-!enddo
-!param_compute_s%Qtens_biharmonic = loc(Qtens_biharmonic(1,1,1,1,nets))
-!param_compute_s%spheremp = loc(elem(nets)%spheremp)
-!param_compute_s%dp0 = loc(dp0)
-!param_compute_s%dt = dt;
-!param_compute_s%nu_q = nu_q
-!param_compute_s%nets = nets
-!param_compute_s%nete = nete
-!param_compute_s%qsize = qsize
-!param_compute_s%step_elem = (loc(elem(nets+1)%spheremp) - loc(elem(nets)%spheremp))/8
-!param_compute_s%rhs_viss = rhs_viss
-!call athread_spawn(slave_compute_overlap, param_compute_s)
-!call athread_join()
-!external :: slave_rhs_multiplier
-!type param_rsh_t
-!  integer*8 :: Qtens_biharmonic, dpdiss_ave, dp0
-!  integer :: nets, nete, qsize, step_elem
-!end type param_rsh_t
-!type(param_rsh_t) :: param_rhs_s
-!do ie=nets,nete
-!    do q=1,qsize
-!      do k=1,nlev
-!        do j=1,np
-!          do i=1,np
-!            !print *, elem(ie)%state%Qdp(i,j,k,q,np1_qdp)
-!            Qtens_biharmonic(i,j,k,q,ie) = 1
-!          enddo
-!        enddo
-!      enddo
-!    enddo
-!  enddo
-!
-!  do k = 1, nlev
-!    dp0(k) = 1;
-!  enddo
-!param_rhs_s%Qtens_biharmonic = loc(Qtens_biharmonic(1,1,1,1,nets))
-!param_rhs_s%dpdiss_ave = loc(elem(nets)%derived%dpdiss_ave)
-!param_rhs_s%dp0 = loc(dp0)
-!param_rhs_s%nets = nets
-!param_rhs_s%nete = nete
-!param_rhs_s%qsize = qsize
-!param_rhs_s%step_elem = (loc(elem(nets+1)%derived%dpdiss_ave) - loc(elem(nets)%derived%dpdiss_ave))/8
-!call athread_spawn(slave_rhs_multiplier, param_rhs_s)
-!call athread_join()
-!external :: slave_qdp_time_avg
-!type param_t
-!  integer*8 :: qdp
-!  integer :: rkstage, n0_qdp, np1_qdp, limiter_option, nu_p, nets, nete, qsize \
-!     , qsize_d, step_elem
-!end type param_t
-!type(param_t) :: param_s
-!param_s%qdp = loc(elem(nets)%state%Qdp)
-!param_s%rkstage = rkstage
-!param_s%n0_qdp = n0_qdp
-!param_s%np1_qdp = np1_qdp
-!param_s%limiter_option = limiter_option
-!param_s%nu_p = nu_p
-!param_s%nets = nets
-!param_s%nete = nete
-!param_s%qsize = qsize
-!param_s%qsize_d = qsize_d
-!param_s%step_elem = (loc(elem(nets+1)%state%Qdp) - loc(elem(nets)%state%Qdp))/8
-!call athread_spawn(slave_qdp_time_avg, param_s)
-!call athread_join()
-!  external :: slave_euler_step
-!  type param_t
-!    integer*8 :: qdp_s_ptr, qdp_leap_ptr, dp_s_ptr, divdp_proj_s_ptr   &
-!        , Qtens_biharmonic, qmax, qmin
-!    real(kind=real_kind) :: dt
-!    integer :: nets, nete, np1_qdp, n0_qdp, DSSopt, rhs_multiplier, qsize
-!  end type param_t
-!  type(param_t) :: param_s
-!  param_s%qdp_s_ptr = loc(elem(nets)%state%Qdp(:,:,:,:,:))
-!  param_s%qdp_leap_ptr = loc(elem((nets+1))%state%Qdp(:,:,:,:,:))
-!  param_s%dp_s_ptr = loc(elem(nets)%derived%dp(:,:,:))
-!  param_s%divdp_proj_s_ptr = loc(elem(nets)%derived%divdp_proj(:,:,:))
-!  param_s%Qtens_biharmonic = loc(Qtens_biharmonic)
-!  param_s%qmax = loc(qmax)
-!  param_s%qmin = loc(qmin)
-!  param_s%dt = dt
-!  param_s%nets = nets
-!  param_s%nete = nete
-!  param_s%np1_qdp = np1_qdp
-!  param_s%n0_qdp = n0_qdp
-!  param_s%DSSopt = DSSopt
-!  param_s%rhs_multiplier = rhs_multiplier
-!  param_s%qsize = qsize
-!  call athread_init()
-!  !call athread_spawn(slave_euler_step, param_s)
-!  !call athread_join()
-!#else
-
-  !external :: slave_euler_v
-  !type param_2d_t
-  !  integer*8 :: qdp_s_ptr, qdp_leap_ptr, divdp_proj, dp, vn0, Dvv, Dinv         \
-  !  , metdet, rmetdet, Qtens_biharmonic, divdp, dpdiss_biharmonic, spheremp      \
-  !  , qmax, qmin
-  !  real(kind=real_kind) :: dt, rrearth, nu_p, nu_q
-  !  integer :: nets, nete, rhs_multiplier, qsize, qsize_d, n0_qdp, np1_qdp, limiter_option\
-  !      , rhs_viss
-  !end type param_2d_t
-  !type(param_2d_t) :: param_2d_s
-  !param_2d_s%qdp_s_ptr = loc(elem(nets)%state%Qdp(:,:,:,:,:))
-  !param_2d_s%qdp_leap_ptr = loc(elem((nets+1))%state%Qdp(:,:,:,:,:))
-  !param_2d_s%divdp_proj = loc(elem(nets)%derived%divdp_proj(:,:,:))
-  !param_2d_s%dp = loc(elem(nets)%derived%dp(:,:,:))
-  !param_2d_s%vn0 = loc(elem(nets)%derived%vn0(:,:,:,:))
-  !param_2d_s%Dvv = loc(deriv%Dvv)
-  !param_2d_s%Dinv = loc(elem(nets)%Dinv(:,:,:,:))
-  !param_2d_s%metdet = loc(elem(nets)%metdet(:,:))
-  !param_2d_s%rmetdet = loc(elem(nets)%rmetdet(:,:))
-  !param_2d_s%Qtens_biharmonic = loc(Qtens_biharmonic(1,1,1,1,nets))
-  !param_2d_s%divdp = loc(elem(nets)%derived%divdp)
-  !param_2d_s%dpdiss_biharmonic = loc(elem(nets)%derived%dpdiss_biharmonic)
-  !param_2d_s%spheremp = loc(elem(nets)%spheremp)
-  !param_2d_s%qmax = loc(qmax(1,1,nets))
-  !param_2d_s%qmin = loc(qmin(1,1,nets))
-  !param_2d_s%dt = dt
-  !param_2d_s%rrearth = rrearth
-  !param_2d_s%nu_p = nu_p
-  !param_2d_s%nu_q = nu_q
-  !param_2d_s%nets = nets
-  !param_2d_s%nete = nete
-  !param_2d_s%rhs_multiplier = rhs_multiplier
-  !param_2d_s%qsize = qsize
-  !param_2d_s%qsize_d = qsize_d
-  !param_2d_s%n0_qdp = n0_qdp
-  !param_2d_s%np1_qdp = np1_qdp
-  !param_2d_s%limiter_option = limiter_option
-  !param_2d_s%rhs_viss = rhs_viss
-  !call athread_spawn(slave_euler_v, param_2d_s)
-  !call athread_join()
-!#endif
-
-  !external :: slave_euler_limit
-  !type param_limit_t
-  !  integer*8 :: spheremp, qmax, qmin, Qtens_temp, Qtens_temp_test, dp_star_temp
-  !  integer :: nets, nete, qsize, limiter_option, step_elem
-  !end type param_limit_t
-  !type(param_limit_t) :: param_limit_s
-  !param_limit_s%spheremp = loc(elem(nets)%spheremp)
-  !param_limit_s%qmax = loc(qmax)
-  !param_limit_s%qmin = loc(qmin)
-  !param_limit_s%Qtens_temp = loc(Qtens_temp(1,1,1,1,nets))
-  !param_limit_s%Qtens_temp_test = loc(Qtens_temp_test(1,1,1,1,nets))
-  !param_limit_s%dp_star_temp = loc(dp_star_temp(1,1,1,1,nets))
-  !param_limit_s%nets = nets
-  !param_limit_s%nete = nete
-  !param_limit_s%qsize = qsize
-  !param_limit_s%limiter_option = limiter_option
-  !param_limit_s%step_elem = (loc(elem(nets+1)%spheremp) - loc(elem(nets)%spheremp))/8
-  !call athread_spawn(slave_euler_limit, param_limit_s)
-  !call athread_join()
-!#endif
-
-  !external :: slave_euler_divergence
-  !type param_2d_t
-  !  integer*8 :: qdp_s_ptr, qdp_leap_ptr, divdp_proj, dp, vn0, Dvv, Dinv       \
-  !      , metdet, rmetdet, Qtens_biharmonic, divdp, dpdiss_biharmonic, spheremp\
-  !      , Qtens_temp, dp_star_temp
-  !  real(kind=real_kind) :: dt, rrearth, nu_p, nu_q
-  !  integer :: nets, nete, rhs_multiplier, qsize, qsize_d, n0_qdp, np1_qdp, limiter_option \
-  !      , rhs_viss
-  !end type param_2d_t
-  !type(param_2d_t) :: param_2d_s
-  !param_2d_s%qdp_s_ptr = loc(elem(nets)%state%Qdp(1,1,1,1,1))
-  !param_2d_s%qdp_leap_ptr = loc(elem((nets+1))%state%Qdp(1,1,1,1,1))
-  !param_2d_s%divdp_proj = loc(elem(nets)%derived%divdp_proj(1,1,1))
-  !param_2d_s%dp = loc(elem(nets)%derived%dp(1,1,1))
-  !param_2d_s%vn0 = loc(elem(nets)%derived%vn0(1,1,1,1))
-  !param_2d_s%Dvv = loc(deriv%Dvv)
-  !param_2d_s%Dinv = loc(elem(nets)%Dinv(1,1,1,1))
-  !param_2d_s%metdet = loc(elem(nets)%metdet(1,1))
-  !param_2d_s%rmetdet = loc(elem(nets)%rmetdet(1,1))
-  !param_2d_s%Qtens_biharmonic = loc(Qtens_biharmonic(1,1,1,1,nets))
-  !param_2d_s%divdp = loc(elem(nets)%derived%divdp)
-  !param_2d_s%dpdiss_biharmonic = loc(elem(nets)%derived%dpdiss_biharmonic)
-  !param_2d_s%spheremp = loc(elem(nets)%spheremp)
-  !param_2d_s%Qtens_temp = loc(Qtens_temp(1,1,1,1,nets))
-  !param_2d_s%dp_star_temp = loc(dp_star_temp(1,1,1,1,nets))
-  !param_2d_s%dt = dt
-  !param_2d_s%rrearth = rrearth
-  !param_2d_s%nu_p = nu_p
-  !param_2d_s%nu_q = nu_q
-  !param_2d_s%nets = nets
-  !param_2d_s%nete = nete
-  !param_2d_s%rhs_multiplier = rhs_multiplier
-  !param_2d_s%qsize = qsize
-  !param_2d_s%qsize_d = qsize_d
-  !param_2d_s%n0_qdp = n0_qdp
-  !param_2d_s%np1_qdp = np1_qdp
-  !param_2d_s%limiter_option = limiter_option
-  !param_2d_s%rhs_viss = rhs_viss
-  !call athread_spawn(slave_euler_divergence, param_2d_s)
-  !call athread_join()
-!#endif
-
+interface
+    subroutine neighbor_minmax(hybrid, edgeMinMax, nets, nete, min_neigh, max_neigh)
+      use kinds , only: real_kind
+      use hybrid_mod, only: hybrid_t
+      use edgetype_mod, only       : EdgeBuffer_t
+      real(kind=real_kind) :: min_neigh(:,:,:)
+      real(kind=real_kind) :: max_neigh(:,:,:)
+      type(EdgeBuffer_t) :: edgeMinMax
+      type(hybrid_t) :: hybrid
+      integer :: nets, nete
+    end subroutine neighbor_minmax
+  end interface
   do i = 1, 5
     call counter(count)
   enddo
@@ -474,6 +235,7 @@ call athread_join()
     enddo
   enddo
   !call biharmonic_wk_scalar(elem, Qtens_biharmonic, deriv, edgeAdv, hybrid, nets, nete)
+  call neighbor_minmax(hybrid, edgeAdv, nets, nete, qmin, qmax)
 #if 0
 #define PRINT_QDP
 #ifdef PRINT_QDP
@@ -636,7 +398,6 @@ param_s2%step_elem = (loc(elem(nets+1)%Dinv) - loc(elem(nets)%Dinv))/8
 call athread_spawn(slave_biharmonic_wk_scalar_2, param_s2)
 call athread_join()
 
-
 #if 0
   do ie = nets, 1
     do q = 1, qsize
@@ -654,6 +415,65 @@ call athread_join()
   enddo
 
 #endif
-
-
 end subroutine biharmonic_wk_scalar
+
+subroutine neighbor_minmax(hybrid, edgeMinMax, nets, nete, min_neigh, max_neigh)
+use kinds , only: real_kind
+use physical_constants, only: rrearth
+use element_mod, only: element_t
+use control_mod, only : north, south, east, west, neast, nwest, seast, swest
+use dimensions_mod, only: np, npdg, nlev, qsize, max_corner_elem, max_neigh_edges, nelemd
+use hybvcoord_mod, only:hvcoord_t
+use hybrid_mod, only: hybrid_t
+use derivative_mod, only: derivative_t
+use edgetype_mod, only       : EdgeBuffer_t
+use control_mod, only : hypervis_scaling, hypervis_power
+implicit none
+
+type(hybrid_t),  intent(in) :: hybrid
+type(EdgeBuffer_t),  intent(inout) :: edgeMinMax
+integer :: nets, nete
+real (kind=real_kind) :: min_neigh(nlev,qsize,nets:nete)
+real (kind=real_kind) :: max_neigh(nlev,qsize,nets:nete)
+
+! local
+integer :: ie,k,q
+integer :: kblk,qblk,kptr
+
+external :: slave_edgespack_es
+type param_edgeSpack_t
+  integer*8 :: qmax, qmin, buf
+  integer*8 :: putmap
+  integer :: nets, nete, qsize
+end type param_edgeSpack_t
+type(param_edgeSpack_t) :: param_edgeSpack_s
+
+external :: slave_edgesunpack_es
+type param_edgeSunpack_t
+  integer*8 :: qmax, qmin, receive
+  integer*8 :: getmap
+  integer :: nets, nete, qsize
+end type param_edgeSunpack_t
+type(param_edgeSunpack_t) :: param_edgeSunpack_s
+
+param_edgeSpack_s%qmin = loc(min_neigh)
+param_edgeSpack_s%qmax = loc(max_neigh)
+param_edgeSpack_s%buf = loc(edgeMinMax%buf)
+param_edgeSpack_s%putmap = loc(edgeMinMax%putmap(1,nets))
+param_edgeSpack_s%nets = nets
+param_edgeSpack_s%nete = nete
+param_edgeSpack_s%qsize = qsize
+call athread_spawn(slave_edgespack_es, param_edgeSpack_s)
+call athread_join()
+
+param_edgeSunpack_s%qmax = loc(max_neigh)
+param_edgeSunpack_s%qmin = loc(min_neigh)
+param_edgeSunpack_s%receive = loc(edgeMinMax%receive)
+param_edgeSunpack_s%getmap = loc(edgeMinMax%getmap(1,nets))
+param_edgeSunpack_s%nets = nets
+param_edgeSunpack_s%nete = nete
+param_edgeSunpack_s%qsize = qsize
+call athread_spawn(slave_edgesunpack_es, param_edgeSunpack_s)
+call athread_join()
+print *, "hello"
+end subroutine neighbor_minmax

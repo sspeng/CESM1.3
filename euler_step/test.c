@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
-#define max(val1, val2) ((val1) > (val2) ? (val1) : (val2))
-#define min(val1, val2) ((val1) < (val2) ? (val1) : (val2))
+#define MAX(val1, val2) ((val1) > (val2) ? (val1) : (val2))
+#define MIN(val1, val2) ((val1) < (val2) ? (val1) : (val2))
 #define abs(value, ret) asm volatile ("fcpys $31, %1, %0" : "=r"(ret) : "r"(value))
 #define sum(sum, array, len) {   \
   int i;   \
@@ -26,66 +26,31 @@
     sum += _array[i];  \
   } \
 }
+
+#define MAX4(a, a1, a2, a3, a4) { \
+  double max = a; \
+  max = MAX(max, a); \
+  max = MAX(max, a1); \
+  max = MAX(max, a2); \
+  max = MAX(max, a3); \
+  max = MAX(max, a4); \
+  a = max; \
+}
+
+#define MIN4(a, a1, a2, a3, a4) { \
+  double min = a; \
+  min = MIN(min, a); \
+  min = MIN(min, a1); \
+  min = MIN(min, a2); \
+  min = MIN(min, a3); \
+  min = MIN(min, a4); \
+  a = min; \
+}
 int main() {
-  //double a, b, max, min;
-  //a = 7.0f; b = 9.0f;
-  //max = max(a, b);
-  //min = min(a, b);
-  //printf("max:%lf, min:%lf\n", max, min);
-  //return 0;
-  //int a[10][10];
-  //int i, j, k;
-  //for (i = 0; i < 10; i++) {
-  //  for (j = 0; j < 10; j++) {
-  //    a[i][j] = 10*i + j;
-  //  }
-  //}
-  //for (i = 0; i < 10; i++) {
-  //  for (j = 0; j < 10; j++) {
-  //    if (j > 3 && j < 5)
-  //      continue;
-  //    printf("%d, ", a[i][j]);
-  //    if (j > 6)
-  //      break;
-  //  }
-  //  printf("\n");
-  //}
-  //return 0;
-  //int sum_a = 0, sum_b = 0, sum_c = 0;
-  //int a[16], b[16], c[16];
-  //int test = -6;
-  //int i = 0;
-  //for (i = 0; i < 16; i++) {
-  //  a[i] = 3;
-  //  b[i] = 5;
-  //}
-  //for (i = 0; i < 16; i++) {
-  //  sum_b = sum_b + b[i];
-  //}
-  ////test = abs(test);
-  //sum(sum_a, a, 16);
-  //for (i = 0; i < 16; i++) {
-  //  c[i] = a[i] * b[i];
-  //  sum_c = sum_c + c[i];
-  //}
-  //sum_c = 0;
-  //int len = 16;
-  //sum_array_multiply_1(sum_c, a, b, len, int);
-  //double mass;
-  //double cc[16], xx[16];
-  //for (i = 0; i < 16; i++) {
-  //  cc[i] = 6;
-  //  xx[i] = 5;
-  //}
-  //sum_array_multiply(mass, cc, xx);
-//
-  //printf("sum_a:%d, sum_c:%d, mass:%lf\n", sum_a, sum_c, mass);
-  //double a;
-  //a = a + 1;
-  //printf("a:%lf\n", a);
-  //return 0;
-  int a = 0;
-  if(a) {
-    printf("iam\n");
-  }
+  double a = 0.5, a1 = 10.1, a2 = 2.0, a3 = 8.3, a4 = 1.9;
+  //MAX4(a, a1, a2, a3, a4);
+  //printf("max:%lf\n",a);
+  MIN4(a, a1, a2, a3, a4);
+  printf("min:%lf\n",a);
+  return 0;
 }

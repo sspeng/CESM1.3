@@ -3,7 +3,8 @@ OBJS = kinds.o hybrid_mod.o physical_constants.o control_mod.o dimensions_mod.o\
 		limiter_optim_iter_full.o 	slave_euler_step.o slave_euler_divergence.o    \
 	  slave_euler_v.o  slave_euler_limit.o slave_biharmonic_wk_scalar.o          \
 	  slave_biharmonic_wk_scalar_2.o slave_qdp_time_avg.o  slave_rhs_multiplier.o\
-		slave_compute_overlap.o slave_update_qdp.o\
+		slave_compute_overlap.o slave_update_qdp.o slave_edgeSpack_es.o            \
+		slave_edgeSunpack_es.o \
 		euler_step.o
 all: euler_step
 euler_step : $(OBJS)
@@ -13,7 +14,8 @@ euler_step : $(OBJS)
 	    slave_euler_divergence.o slave_euler_v.o slave_euler_limit.o             \
 	    slave_biharmonic_wk_scalar.o slave_biharmonic_wk_scalar_2.o              \
 			euler_step.o slave_qdp_time_avg.o slave_rhs_multiplier.o                 \
-			slave_compute_overlap.o slave_update_qdp.o\
+			slave_compute_overlap.o slave_update_qdp.o slave_edgeSpack_es.o          \
+			slave_edgeSunpack_es.o \
 	    -o ../bin/euler_step
 element_mod.o: element_mod.F90
 	sw5f90 -host -c element_mod.F90
@@ -57,6 +59,10 @@ slave_compute_overlap.o : slave_compute_overlap.c
 	sw5cc -slave -c slave_compute_overlap.c -msimd
 slave_update_qdp.o : slave_update_qdp.c
 	sw5cc -slave -c slave_update_qdp.c -msimd
+slave_edgeSpack_es.o : slave_edgeSpack_es.c
+	sw5cc -slave -c slave_edgeSpack_es.c -msimd
+slave_edgeSunpack_es.o : slave_edgeSunpack_es.c
+	sw5cc -slave -c slave_edgeSunpack_es.c -msimd
 euler_step.o: euler_step.F90
 	sw5f90 -host -c euler_step.F90
 clean:
