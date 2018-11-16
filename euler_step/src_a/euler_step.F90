@@ -188,14 +188,6 @@ implicit none
   integer :: count = 0
   real (kind=real_kind) :: tol_limiter = 5D-14
 
-  external :: slave_qdp_time_avg
-  type param_t
-    integer*8 :: qdp
-    integer :: rkstage, n0_qdp, np1_qdp, nets, nete, qsize \
-       , qsize_d, step_elem
-  end type param_t
-  type(param_t) :: param_s
-
   interface
     subroutine biharmonic_wk_scalar(elem, Qtens_biharmonic, deriv, edgeAdv, hybrid, nets, nete)
       use kinds , only: real_kind
@@ -243,20 +235,7 @@ interface
     enddo
   enddo
   !call biharmonic_wk_scalar(elem, Qtens_biharmonic, deriv, edgeAdv, hybrid, nets, nete)
-  !call neighbor_minmax(hybrid, edgeAdv, nets, nete, qmin, qmax)
-
-  param_s%qdp = loc(elem(nets)%state%Qdp)
-  param_s%rkstage = rkstage
-  param_s%n0_qdp = n0_qdp
-  param_s%np1_qdp = np1_qdp
-  param_s%nets = nets
-  param_s%nete = nete
-  param_s%qsize = qsize
-  param_s%qsize_d = qsize_d
-  param_s%step_elem = (loc(elem(nets+1)%state%Qdp) - loc(elem(nets)%state%Qdp))/8
-  call athread_spawn(slave_qdp_time_avg, param_s)
-  call athread_join();
-
+  call neighbor_minmax(hybrid, edgeAdv, nets, nete, qmin, qmax)
 #if 0
 #define PRINT_QDP
 #ifdef PRINT_QDP

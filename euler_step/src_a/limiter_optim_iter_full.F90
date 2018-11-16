@@ -91,7 +91,7 @@ implicit none
       ptens(k1,k)=ptens(k1,k)*dpmass(k1,k)
     enddo
   enddo
-#if 0
+#if 1
   print *, tol_limiter*5D-3*5.82989072416270755D-293
 #endif
 end subroutine limiter_optim_iter_full_f
