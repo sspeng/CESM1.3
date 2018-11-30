@@ -5,10 +5,7 @@
 
 #define NP    4
 #define NLEV  30
-#define UC    1         // a unit that divides nete by column direction
-#define UR    3         // a unit that divides qsize by row direcion
-#define NC    8
-#define NR    8
+#define KBLK  12
 #define maxiter           (NP*NP - 1)
 #define stripe_qdp        (NLEV*NP*NP)
 #define istep_dp          (NLEV*NP*NP)
@@ -16,12 +13,12 @@
 #define qstep_dp_star     (NLEV*NP*NP)
 #define qstep_qmax        NLEV
 #define qstep_Qtens       (NLEV*NP*NP)
-#define block             (UC*NLEV*NP*NP)
-#define block_dp          (NLEV*NP*NP)
-#define block_vn0         (NLEV*2*NP*NP)
+#define block             (KBLK*NP*NP)
+#define block_dp          (KBLK*NP*NP)
+#define block_vn0         (KBLK*2*NP*NP)
 #define block_gradQ       (2*NP*NP)
-#define block_dp_star     (NLEV*NP*NP)
-#define block_Qtens       (NLEV*NP*NP)
+#define block_dp_star     (KBLK*NP*NP)
+#define block_Qtens       (KBLK*NP*NP)
 #define block_Dinv        (2*2*NP*NP)
 #define block_det         (NP*NP)
 
@@ -102,37 +99,35 @@ void slave_euler_v_(param_t *param_s) {
   int limiter_option = param_d.limiter_option;
   int rhs_viss = param_d.rhs_viss;
 
-  rid = id / NC;
-  cid = id % NC;
-  int loop_r = ((nete - nets + 1) + UR*NR - 1)/(UR*NR);
-  int loop_c = (qsize + UC*NC - 1)/(UC*NC);
   int slice_qdp = (int)(gl_qdp_leap - gl_qdp);
-  int istep_dp_star = qsize*NLEV*NP*NP;
+  //int istep_dp_star = qsize*NLEV*NP*NP;
   int istep_Qtens = qsize*NLEV*NP*NP;
   int istep_qmax = qsize*NLEV;
-  int c, r, i, j, l, k, k1, iter, q, ie, cbeg, cend, rbeg, rend, cn, rn;
+  int i, j, k, q, ie, l, k_beg, k_end, k_n, q_beg, q_end, q_n, pos;
 
-  double Qdp[block];
-  double Qdp_np1[block];
-  double dp[block_dp];
-  double dp_temp[block_dp];
-  double dp_star[block_dp_star];
-  double vn0[block_vn0];
-  double Vstar[block_vn0];                 // same size as vn0
-  double divdp_proj[block_dp];             // same size as dp_tmp
-  double gradQ[block_gradQ];
+  double Qdp[KBLK*NP*NP];
+  double Qdp_np1[KBLK*NP*NP];
+  double dp[KBLK*NP*NP];
+  double dp_temp[KBLK*NP*NP];
+  double dp_star[KBLK*NP*NP];
+  double vn0[KBLK*2*NP*NP];
+  double Vstar[KBLK*2*NP*NP];                 // same size as vn0
+  double divdp_proj[KBLK*NP*NP];             // same size as dp_tmp
+  double gradQ[2*NP*NP];
   double Dvv[NP*NP];
   double Dinv[2*2*NP*NP];
   double metdet[NP*NP];
   double rmetdet[NP*NP];
-  double Qtens_temp[block_Qtens];
-  double Qtens_biharmonic[block];
-  double dpdiss_biharmonic[block_dp];     // same size as dp
-  double divdp[block_dp];                 // same size as dp
+  double Qtens_temp[KBLK*NP*NP];
+  double Qtens_biharmonic[KBLK*NP*NP];
+  double dpdiss_biharmonic[KBLK*NP*NP];     // same size as dp
+  double divdp[KBLK*NP*NP];                 // same size as dp
   double dpdiss[NP*NP];
   double spheremp[NP*NP];
-  double qmax[UC*NLEV];
-  double qmin[UC*NLEV];
+  double qmax[KBLK];
+  double qmin[KBLK];
+
+  int sum_k = qsize*NLEV;
 
 #if 0
   if (id == 0) {
@@ -151,10 +146,10 @@ void slave_euler_v_(param_t *param_s) {
   double dudx00, dvdy00;
   double gv[2*NP*NP], vvtemp[NP*NP];
   /* local Variables of deivergence_sphere */
-  double cc[NP*NP], xx[NP*NP];
-  double addmass, weightssum;
-  double mass, sumc;
-  double tol_limiter = 5e-14;
+  //double cc[NP*NP], xx[NP*NP];
+  //double addmass, weightssum;
+  //double mass, sumc;
+  //double tol_limiter = 5e-14;
 
   double *src_qdp, *src_qdp_np1, *src_dp, *src_vn0, *src_divdp_proj, *src_Dinv,\
      *src_metdet, *src_rmetdet, *src_Qtens_biharmonic, *src_divdp,             \
@@ -162,40 +157,57 @@ void slave_euler_v_(param_t *param_s) {
   double *gl_n0_qdp = gl_qdp + (n0_qdp - 1)*qsize_d*stripe_qdp;
   double *gl_np1_qdp = gl_qdp + (np1_qdp - 1)*qsize_d*stripe_qdp;
 
-  // Divide ie-axis data on the row cpe with loop_r
-  // the value of loop_r rely on NR, UR; NP is the number of cloumn cpe,
-  // UR is the unit that divides ie size by cloumn direcion,
-  // Divide q-axis data on the cloumn cpe with loop_c
-  // same as loop_r, the loop_c rely on NC, UC
-  // UC is the unit that divides q size by row direction
-  for (r = 0; r < loop_r; r++) {
-    rbeg = r*NR*UR + rid*UR;
-    rend = r*NR*UR + (rid + 1)*UR;
-    rend = rend < (nete - nets + 1) ? rend : (nete - nets + 1);
-    rn = rend - rbeg;
-    rn = rn < 0 ? 0 : rn;   // handling boundary issues, removing the case where rn < 0
-    for (ie = 0; ie < rn; ie++) {
-      src_dp = gl_dp + (rbeg + ie)*slice_qdp;
-      src_vn0 = gl_vn0 + (rbeg + ie)*slice_qdp;
-      src_divdp_proj = gl_divdp_proj + (rbeg + ie)*slice_qdp;
-      src_divdp = gl_divdp + (rbeg + ie)*slice_qdp;
-      src_dpdiss_biharmonic = gl_dpdiss_biharmonic + (rbeg + ie)*slice_qdp;
-      src_Dinv = gl_Dinv + (rbeg + ie)*slice_qdp;
-      src_metdet = gl_metdet + (rbeg + ie)*slice_qdp;
-      src_rmetdet = gl_rmetdet + (rbeg + ie)*slice_qdp;
-      src_spheremp = gl_spheremp + (rbeg + ie)*slice_qdp;
-      pe_get(src_dp, dp, block_dp*sizeof(double));
-      pe_get(src_vn0, vn0, block_vn0*sizeof(double));
-      pe_get(src_divdp_proj, divdp_proj, block_dp*sizeof(double));
-      pe_get(src_divdp, divdp, block_dp*sizeof(double));
-      pe_get(src_dpdiss_biharmonic, dpdiss_biharmonic, block_dp*sizeof(double));
-      pe_get(src_Dinv, Dinv, block_Dinv*sizeof(double));
-      pe_get(src_metdet, metdet, block_det*sizeof(double));
-      pe_get(src_rmetdet, rmetdet, block_det*sizeof(double));
+  for (ie = 0; ie < nete - nets + 1; ie++) {
+    // roll the q and k into the id of cpe,
+    // other words is that (q, k) has relationship with id
+    // be careful that the edge of possbilly exception
+    q_beg = KBLK*id/NLEV;
+    q_end = (KBLK*(id + 1))/NLEV;
+    q_end = q_end < qsize ? q_end : qsize;
+    k_beg = KBLK*id - q_beg*NLEV;
+    k_end = KBLK*(id + 1) - q_beg*NLEV;
+    k_end = k_end < NLEV ? k_end : NLEV;
+    k_n = k_end - k_beg;
+    q_n = (k_n == 6 && q_beg != (qsize - 1)) ? 1 : 0;
+    q_n = (id*KBLK > sum_k) ? -1 : q_n;
+    //if (id == 62) printf("q_beg:%d, q_end:%d, k_beg:%d, k_end:%d, k_n:%d\n", q_beg, q_end, k_beg, k_end, k_n);
+    for (q = 0; q <= q_n; q++) {
+      src_dp = gl_dp + ie*slice_qdp + (k_beg + q*(q*NLEV - k_beg) - q*NLEV)*NP*NP;
+      src_vn0 = gl_vn0 + ie*slice_qdp + (k_beg + q*(q*NLEV - k_beg) - q*NLEV)*2*NP*NP;
+      src_divdp_proj = gl_divdp_proj + ie*slice_qdp                            \
+          + (k_beg + q*(q*NLEV - k_beg) - q*NLEV)*NP*NP;
+      src_divdp = gl_divdp + ie*slice_qdp + (k_beg + q*(q*NLEV - k_beg) - q*NLEV)*NP*NP;
+      src_dpdiss_biharmonic = gl_dpdiss_biharmonic + ie*slice_qdp              \
+          + (k_beg + q*(q*NLEV - k_beg) - q*NLEV)*NP*NP;
+      src_Dinv = gl_Dinv + ie*slice_qdp;
+      src_metdet = gl_metdet + ie*slice_qdp;
+      src_rmetdet = gl_rmetdet + ie*slice_qdp;
+      src_spheremp = gl_spheremp + ie*slice_qdp;
+      src_qdp = gl_n0_qdp + ie*slice_qdp + q_beg*NLEV*NP*NP                    \
+          + (k_beg + q*(q*NLEV - k_beg))*NP*NP;
+      src_qdp_np1 = gl_np1_qdp + ie*slice_qdp + q_beg*NLEV*NP*NP               \
+          + (k_beg + q*(q*NLEV - k_beg))*NP*NP;
+      src_Qtens_biharmonic = gl_Qtens_biharmonic + ie*istep_Qtens + q_beg*NLEV*NP*NP \
+          + (k_beg + q*(q*NLEV - k_beg))*NP*NP;
+      src_qmax = gl_qmax + ie*istep_qmax + q_beg*NLEV                          \
+          + (k_beg + q*(q*NLEV - k_beg));
+      src_qmin = gl_qmin + ie*istep_qmax + q_beg*NLEV                          \
+          + (k_beg + q*(q*NLEV - k_beg));
+      pe_get(src_dp, dp, k_n*NP*NP*sizeof(double));
+      pe_get(src_vn0, vn0, k_n*2*NP*NP*sizeof(double));
+      pe_get(src_divdp_proj, divdp_proj, k_n*NP*NP*sizeof(double));
+      pe_get(src_divdp, divdp, k_n*NP*NP*sizeof(double));
+      pe_get(src_dpdiss_biharmonic, dpdiss_biharmonic, k_n*NP*NP*sizeof(double));
+      pe_get(src_Dinv, Dinv, 2*2*NP*NP*sizeof(double));
+      pe_get(src_metdet, metdet, NP*NP*sizeof(double));
+      pe_get(src_rmetdet, rmetdet, NP*NP*sizeof(double));
       pe_get(src_spheremp, spheremp, NP*NP*sizeof(double));
+      pe_get(src_qdp, Qdp, k_n*NP*NP*sizeof(double));
+      pe_get(src_Qtens_biharmonic, Qtens_biharmonic, k_n*NP*NP*sizeof(double));
+      pe_get(src_qmax, qmax, k_n*sizeof(double));
+      pe_get(src_qmin, qmin, k_n*sizeof(double));
       dma_syn();
-
-      for (k = 0; k < NLEV; k++) {
+      for (k = 0; k < k_n; k++) {
         for (j = 0; j < NP; j++) {
           for (i = 0; i < NP; i++) {
             int pos_dp = k*NP*NP + j*NP + i;
@@ -207,136 +219,110 @@ void slave_euler_v_(param_t *param_s) {
           }
         }
       }
-      for (c = 0; c < loop_c; c++) {
-        cbeg = c*NC*UC + cid*UC;
-        cend = c*NC*UC + (cid + 1)*UC;
-        cend = cend < qsize ? cend : qsize;
-        cn = cend - cbeg;
-        if (cn > 0) {   // if cn < 0, the dma will get exceptional contribution
-          src_qdp = gl_n0_qdp + (rbeg + ie)*slice_qdp + cbeg*stripe_qdp;
-          src_qdp_np1 = gl_np1_qdp + (rbeg + ie)*slice_qdp + cbeg*stripe_qdp;
-          src_Qtens_biharmonic = gl_Qtens_biharmonic + (rbeg + ie)*istep_Qtens \
-              + cbeg*qstep_Qtens;
-          src_qmax = gl_qmax + (rbeg + ie)*istep_qmax + cbeg*qstep_qmax;
-          src_qmin = gl_qmin + (rbeg + ie)*istep_qmax + cbeg*qstep_qmax;
-          pe_get(src_qdp, Qdp, block*sizeof(double));
-          pe_get(src_Qtens_biharmonic, Qtens_biharmonic, block*sizeof(double));
-          pe_get(src_qmax, qmax, UC*NLEV*sizeof(double));
-          pe_get(src_qmin, qmin, UC*NLEV*sizeof(double));
-          dma_syn();
-          for (q = 0; q < cn; q++) {
-            for (k = 0; k < NLEV; k++) {  // start of divergence_sphere function
-              for (j = 0; j < NP; j++) {
-                for (i = 0; i < NP; i++) {
-                  int pos_qdp = q*NLEV*NP*NP + k*NP*NP + j*NP + i;
-                  int pos_vn0_1 = k*2*NP*NP + j*NP + i;
-                  int pos_vn0_2 = k*2*NP*NP + NP*NP + j*NP + i;
-                  int pos_gradQ_1 = j*NP + i;
-                  int pos_gradQ_2 = NP*NP + j*NP + i;
-                  int pos_Dinv_1 = j*NP + i;
-                  int pos_Dinv_2 = NP*NP + j*NP + i;
-                  int pos_Dinv_3 = 2*NP*NP + j*NP + i;
-                  int pos_Dinv_4 = 3*NP*NP + j*NP + i;
-                  int pos_gv_1 = j*NP + i;
-                  int pos_gv_2 = NP*NP + j*NP + i;
-                  int pos_det = j*NP + i;
-                  gradQ[pos_gradQ_1] = Vstar[pos_vn0_1]*Qdp[pos_qdp];
-                  gradQ[pos_gradQ_2] = Vstar[pos_vn0_2]*Qdp[pos_qdp];
-                  gv[pos_gv_1] = metdet[pos_det]*(Dinv[pos_Dinv_1]*gradQ[pos_gradQ_1] \
-                      + Dinv[pos_Dinv_3]*gradQ[pos_gradQ_2]);
-                  gv[pos_gv_2] = metdet[pos_det]*(Dinv[pos_Dinv_2]*gradQ[pos_gradQ_1] \
-                      + Dinv[pos_Dinv_4]*gradQ[pos_gradQ_2]);
-                }
-              }
-              for (j = 0; j < NP; j++) {
-                for (l = 0; l < NP; l++) {
-                  dudx00 = 0.0;
-                  dvdy00 = 0.0;
-                  for (i = 0; i < NP; i++) {
-                    int pos_Dvv = l*NP + i;
-                    int pos_gv_1 = j*NP + i;
-                    int pos_gv_2 = NP*NP + i*NP + j;
-                    dudx00 = dudx00 + Dvv[pos_Dvv]*gv[pos_gv_1];
-                    dvdy00 = dvdy00 + Dvv[pos_Dvv]*gv[pos_gv_2];
-                  }
-                  int pos_dp_star = k*NP*NP + j*NP + l;
-                  int pos_vvtemp = l*NP + j;
-                  dp_star[pos_dp_star] = dudx00;
-                  vvtemp[pos_vvtemp] = dvdy00;
-                }
-              }
-              for (j = 0; j < NP; j++) {
-                for (i = 0; i < NP; i++) {
-                  int pos_dp_star = k*NP*NP + j*NP + i;
-                  int pos_vvtemp = j*NP + i;
-                  int pos_det = j*NP + i;
-                  dp_star[pos_dp_star] = (dp_star[pos_dp_star] + vvtemp[pos_vvtemp])   \
-                      *(rmetdet[pos_det]*rrearth);
-                }
-              }   // end of divergence_sphere
-              for (j = 0; j < NP; j++) {
-                for (i = 0; i < NP; i++) {
-                  int pos_Qtens = k*NP*NP + j*NP + i;
-                  int pos_dp_star = k*NP*NP + j*NP + i;
-                  int pos_qdp = q*NLEV*NP*NP + k*NP*NP + j*NP + i;
-                  Qtens_temp[pos_Qtens] = Qdp[pos_qdp] - dt*dp_star[pos_dp_star];
-                }
-              }
-              if (rhs_viss != 0) {
-                for (j = 0; j < NP; j++) {
-                  for (i = 0; i < NP; i++) {
-                    int pos_Qtens = k*NP*NP + j*NP + i;
-                    int pos_bi = q*NLEV*NP*NP + k*NP*NP + j*NP + i;
-                    Qtens_temp[pos_Qtens] = Qtens_temp[pos_Qtens] + Qtens_biharmonic[pos_bi];
-                  }
-                }
-              }
-            }   // end loop k
-            if (limiter_option == 8) {
-              for (k = 0; k < NLEV; k++) {
-                for (j = 0; j < NP; j++) {
-                  for (i = 0; i < NP; i++) {
-                    int pos_dp_star = k*NP*NP + j*NP + i;
-                    int pos_dp = k*NP*NP + j*NP + i;
-                    dp_star[pos_dp_star] = dp_temp[pos_dp] - dt*divdp[pos_dp];
-                  }
-                }
-                if (nu_p > 0 && rhs_viss != 0) {
-                  for (j = 0; j < NP; j++) {
-                    for (i = 0; i < NP; i++) {
-                      int pos_dpdiss = j*NP + i;
-                      int pos_spheremp = j*NP + i;
-                      int pos_dpdiss_bi = k*NP*NP + j*NP + i;
-                      int pos_dp_star = k*NP*NP + j*NP + i;
-                      dpdiss[pos_dpdiss] = dpdiss_biharmonic[pos_dpdiss_bi];
-                      dp_star[pos_dp_star] = dp_star[pos_dp_star]              \
-                          - rhs_viss*dt*nu_q*dpdiss[pos_dpdiss]/spheremp[pos_spheremp];
-                    }
-                  }
-                }
-              }
-              limiter_optim_iter_full_f_(Qtens_temp, spheremp    \
-                  , &qmin[q*NLEV], &qmax[q*NLEV], dp_star);
-            }   // end if limiter_option = 8
-            for (k = 0; k < NLEV; k++) {
-              for (j = 0; j < NP; j++) {
-                for (i = 0; i < NP; i++) {
-                  int pos_Qtens = k*NP*NP + j*NP + i;
-                  int pos = q*NLEV*NP*NP + k*NP*NP + j*NP + i;
-                  int pos_spheremp = j*NP + i;
-                  Qdp_np1[pos] = spheremp[pos_spheremp]*Qtens_temp[pos_Qtens];
-                }
+      for (k = 0; k < k_n; k++) {
+        for (j = 0; j < NP; j++) {
+          for (i = 0; i < NP; i++) {
+            int pos_qdp = k*NP*NP + j*NP + i;
+            int pos_vn0_1 = k*2*NP*NP + j*NP + i;
+            int pos_vn0_2 = k*2*NP*NP + NP*NP + j*NP + i;
+            int pos_gradQ_1 = j*NP + i;
+            int pos_gradQ_2 = NP*NP + j*NP + i;
+            int pos_Dinv_1 = j*NP + i;
+            int pos_Dinv_2 = NP*NP + j*NP + i;
+            int pos_Dinv_3 = 2*NP*NP + j*NP + i;
+            int pos_Dinv_4 = 3*NP*NP + j*NP + i;
+            int pos_gv_1 = j*NP + i;
+            int pos_gv_2 = NP*NP + j*NP + i;
+            int pos_det = j*NP + i;
+            gradQ[pos_gradQ_1] = Vstar[pos_vn0_1]*Qdp[pos_qdp];
+            gradQ[pos_gradQ_2] = Vstar[pos_vn0_2]*Qdp[pos_qdp];
+            gv[pos_gv_1] = metdet[pos_det]*(Dinv[pos_Dinv_1]*gradQ[pos_gradQ_1]\
+                + Dinv[pos_Dinv_3]*gradQ[pos_gradQ_2]);
+            gv[pos_gv_2] = metdet[pos_det]*(Dinv[pos_Dinv_2]*gradQ[pos_gradQ_1]\
+                + Dinv[pos_Dinv_4]*gradQ[pos_gradQ_2]);
+          }
+        }
+        for (j = 0; j < NP; j++) {
+          for (l = 0; l < NP; l++) {
+            dudx00 = 0.0;
+            dvdy00 = 0.0;
+            for (i = 0; i < NP; i++) {
+              int pos_Dvv = l*NP + i;
+              int pos_gv_1 = j*NP + i;
+              int pos_gv_2 = NP*NP + i*NP + j;
+              dudx00 = dudx00 + Dvv[pos_Dvv]*gv[pos_gv_1];
+              dvdy00 = dvdy00 + Dvv[pos_Dvv]*gv[pos_gv_2];
+            }
+            int pos_dp_star = k*NP*NP + j*NP + l;
+            int pos_vvtemp = l*NP + j;
+            dp_star[pos_dp_star] = dudx00;
+            vvtemp[pos_vvtemp] = dvdy00;
+          }
+        }
+        for ( j = 0; j < NP; j++) {
+          for (i = 0; i < NP; i++) {
+            int pos_dp_star = k*NP*NP + j*NP + i;
+            int pos_vvtemp = j*NP + i;
+            int pos_det = j*NP + i;
+            dp_star[pos_dp_star] = (dp_star[pos_dp_star] + vvtemp[pos_vvtemp]) \
+                *(rmetdet[pos_det]*rrearth);
+          }
+        } // end of divergence_sphere
+        for (j = 0; j < NP; j++) {
+          for (i = 0; i < NP; i++) {
+            int pos = k*NP*NP + j*NP + i;
+            int pos_dp_star = k*NP*NP + j*NP + i;
+            Qtens_temp[pos] = Qdp[pos] - dt*dp_star[pos_dp_star];
+          }
+        }
+        if (rhs_viss != 0) {
+          for (j = 0; j < NP; j++) {
+            for (i = 0; i < NP; i++) {
+              int pos = k*NP*NP + j*NP + i;
+              Qtens_temp[pos] = Qtens_temp[pos] + Qtens_biharmonic[pos];
+            }
+          }
+        }
+      } // end loop k
+      if (limiter_option == 8) {
+        for (k = 0; k < k_n; k++) {
+          for (j = 0; j < NP; j++) {
+            for (i = 0; i < NP; i++) {
+              int pos = k*NP*NP + j*NP + i;
+              dp_star[pos] = dp_temp[pos] - dt*divdp[pos];
+            }
+          }
+          if (nu_p > 0 && rhs_viss != 0) {
+            for (j = 0; j < NP; j++) {
+              for (i = 0; i < NP; i++) {
+                int pos_dpdiss = j*NP + i;
+                int pos_spheremp = j*NP + i;
+                int pos_dpdiss_bi = k*NP*NP + j*NP + i;
+                int pos_dp_star = k*NP*NP + j*NP + i;
+                dpdiss[pos_dpdiss] = dpdiss_biharmonic[pos_dpdiss_bi];
+                dp_star[pos_dp_star] = dp_star[pos_dp_star]                    \
+                    - rhs_viss*dt*nu_q*dpdiss[pos_dpdiss]/spheremp[pos_spheremp];
               }
             }
-          }     // end loop q
-          pe_put(src_qdp_np1, Qdp_np1, cn*NLEV*NP*NP*sizeof(double));
-          pe_put(src_qmax, qmax, cn*NLEV*sizeof(double));
-          pe_put(src_qmin, qmin, cn*NLEV*sizeof(double));
-          dma_syn();
+          }
         }
-      }
-    }
-  }
+        limiter_optim_iter_full_f_(Qtens_temp, spheremp, qmin, qmax, dp_star, &k_n);
+      } // end if limiter_option = 8
+      for ( k = 0; k < k_n; k++) {
+        for (j = 0; j < NP; j++) {
+          for (i = 0; i < NP; i++) {
+            int pos = k*NP*NP + j*NP + i;
+            int pos_spheremp = j*NP + i;
+            Qdp_np1[pos] = spheremp[pos_spheremp]*Qtens_temp[pos];
+          }
+        }
+      } // end loop k
+      pe_put(src_qdp_np1, Qdp_np1, k_n*NP*NP*sizeof(double));
+      pe_put(src_qmax, qmax, k_n*sizeof(double));
+      pe_put(src_qmin, qmin, k_n*sizeof(double));
+      dma_syn();
+    } // end loop q
+  } // end loop ie
 #if 0
   if (id == 0)
     printf("value:%lf\n", (tol_limiter*5E-3*5.82989072416270755E-290));

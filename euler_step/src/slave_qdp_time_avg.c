@@ -7,7 +7,7 @@
 #define NC 8
 #define NR 8
 #define qstep_Qdp (NLEV*NP*NP) // stripe in q axis of Qtens_biharmonic array
-#define block  (12*NP*NP)
+#define block  (KBLK*NP*NP)
 
 
 #define get_row_id(rid) asm volatile ("rcsr %0, 1" : "=r"(rid))
@@ -16,8 +16,8 @@
 #define REG_PUTC(var, dst) asm volatile ("putc %0,%1"::"r"(var),"r"(dst))
 #define REG_GETR(var) asm volatile ("getr %0":"=r"(var))
 #define REG_GETC(var) asm volatile ("getc %0":"=r"(var))
-#define max(val1, val2) ((val1) > (val2) ? (val1) : (val2))
-#define min(val1, val2) ((val1) < (val2) ? (val1) : (val2))
+#define MAX(val1, val2) ((val1) > (val2) ? (val1) : (val2))
+#define MIN(val1, val2) ((val1) < (val2) ? (val1) : (val2))
 
 
 typedef struct {
@@ -66,12 +66,13 @@ void slave_qdp_time_avg_(param_t *param_s) {
 
   int i, j, k, ie, k_beg, k_end, k_n;
 
-  for (ie = 0; ie < nete; ie++) {
+  for (ie = 0; ie < nete - nets + 1; ie++) {
     k_beg = id*KBLK;
     k_end = (id + 1)*KBLK;
     k_end = k_end < sum_k ? k_end : sum_k;
     k_n = k_end - k_beg;
 
+    //if (id == 63) printf("k_beg:%d, k_n:%d\n", k_beg, k_n);
     if (k_n > 0) {
       src_qdp_n0 = gl_qdp_n0 + ie*step_elem + k_beg*NP*NP;
       src_qdp_np1 = gl_qdp_np1 + ie*step_elem + k_beg*NP*NP;

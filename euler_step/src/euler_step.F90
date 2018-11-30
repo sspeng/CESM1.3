@@ -188,13 +188,32 @@ implicit none
   integer :: count = 0
   real (kind=real_kind) :: tol_limiter = 5D-14
 
-  external :: slave_qdp_time_avg
+  !external :: slave_qdp_time_avg
+  !type param_t
+  !  integer*8 :: qdp
+  !  integer :: rkstage, n0_qdp, np1_qdp, nets, nete, qsize \
+  !     , qsize_d, step_elem
+  !end type param_t
+  !type(param_t) :: param_s
+  !external :: slave_euler_step
+  external :: slave_euler_step
   type param_t
-    integer*8 :: qdp
-    integer :: rkstage, n0_qdp, np1_qdp, nets, nete, qsize \
-       , qsize_d, step_elem
+    integer*8 :: qdp_s_ptr, qdp_leap_ptr,dp_s_ptr, divdp_proj_s_ptr   &
+        , Qtens_biharmonic, qmax, qmin
+    real(kind=real_kind) :: dt
+    integer :: nets, nete, np1_qdp, n0_qdp, DSSopt, rhs_multiplier, qsize, qsize_d
   end type param_t
   type(param_t) :: param_s
+  external :: slave_euler_v
+  type param_2d_t
+    integer*8 :: qdp_s_ptr, qdp_leap_ptr, divdp_proj, dp, vn0, Dvv, Dinv         \
+    , metdet, rmetdet, Qtens_biharmonic, divdp, dpdiss_biharmonic, spheremp      \
+    , qmax, qmin
+    real(kind=real_kind) :: dt, rrearth, nu_p, nu_q
+    integer :: nets, nete, rhs_multiplier, qsize, qsize_d, n0_qdp, np1_qdp, limiter_option\
+        , rhs_viss
+  end type param_2d_t
+  type(param_2d_t) :: param_2d_s
 
   interface
     subroutine biharmonic_wk_scalar(elem, Qtens_biharmonic, deriv, edgeAdv, hybrid, nets, nete)
@@ -245,17 +264,65 @@ interface
   !call biharmonic_wk_scalar(elem, Qtens_biharmonic, deriv, edgeAdv, hybrid, nets, nete)
   !call neighbor_minmax(hybrid, edgeAdv, nets, nete, qmin, qmax)
 
-  param_s%qdp = loc(elem(nets)%state%Qdp)
-  param_s%rkstage = rkstage
-  param_s%n0_qdp = n0_qdp
-  param_s%np1_qdp = np1_qdp
-  param_s%nets = nets
-  param_s%nete = nete
-  param_s%qsize = qsize
-  param_s%qsize_d = qsize_d
-  param_s%step_elem = (loc(elem(nets+1)%state%Qdp) - loc(elem(nets)%state%Qdp))/8
-  call athread_spawn(slave_qdp_time_avg, param_s)
-  call athread_join();
+  !param_s%qdp = loc(elem(nets)%state%Qdp)
+  !param_s%rkstage = rkstage
+  !param_s%n0_qdp = n0_qdp
+  !param_s%np1_qdp = np1_qdp
+  !param_s%nets = nets
+  !param_s%nete = nete
+  !param_s%qsize = qsize
+  !param_s%qsize_d = qsize_d
+  !param_s%step_elem = (loc(elem(nets+1)%state%Qdp) - loc(elem(nets)%state%Qdp))/8
+  !call athread_spawn(slave_qdp_time_avg, param_s)
+  !call athread_join();
+  !param_s%qdp_s_ptr = loc(elem(nets)%state%Qdp(:,:,:,:,:))
+  !param_s%qdp_leap_ptr = loc(elem((nets+1))%state%Qdp(:,:,:,:,:))
+  !param_s%dp_s_ptr = loc(elem(nets)%derived%dp(:,:,:))
+  !param_s%divdp_proj_s_ptr = loc(elem(nets)%derived%divdp_proj(:,:,:))
+  !param_s%Qtens_biharmonic = loc(Qtens_biharmonic(1,1,1,1,nets))
+  !param_s%qmax = loc(qmax(1,1,nets))
+  !param_s%qmin = loc(qmin(1,1,nets))
+  !param_s%dt = dt
+  !param_s%nets = nets
+  !param_s%nete = nete
+  !param_s%np1_qdp = np1_qdp
+  !param_s%n0_qdp = n0_qdp
+  !param_s%DSSopt = DSSopt
+  !param_s%rhs_multiplier = rhs_multiplier
+  !param_s%qsize = qsize
+  !param_s%qsize_d = qsize_d
+  !call athread_spawn(slave_euler_step, param_s)
+  !call athread_join()
+  param_2d_s%qdp_s_ptr = loc(elem(nets)%state%Qdp(:,:,:,:,:))
+  param_2d_s%qdp_leap_ptr = loc(elem((nets+1))%state%Qdp(:,:,:,:,:))
+  param_2d_s%divdp_proj = loc(elem(nets)%derived%divdp_proj(:,:,:))
+  param_2d_s%dp = loc(elem(nets)%derived%dp(:,:,:))
+  param_2d_s%vn0 = loc(elem(nets)%derived%vn0(:,:,:,:))
+  param_2d_s%Dvv = loc(deriv%Dvv)
+  param_2d_s%Dinv = loc(elem(nets)%Dinv(:,:,:,:))
+  param_2d_s%metdet = loc(elem(nets)%metdet(:,:))
+  param_2d_s%rmetdet = loc(elem(nets)%rmetdet(:,:))
+  param_2d_s%Qtens_biharmonic = loc(Qtens_biharmonic(1,1,1,1,nets))
+  param_2d_s%divdp = loc(elem(nets)%derived%divdp)
+  param_2d_s%dpdiss_biharmonic = loc(elem(nets)%derived%dpdiss_biharmonic)
+  param_2d_s%spheremp = loc(elem(nets)%spheremp)
+  param_2d_s%qmax = loc(qmax(1,1,nets))
+  param_2d_s%qmin = loc(qmin(1,1,nets))
+  param_2d_s%dt = dt
+  param_2d_s%rrearth = rrearth
+  param_2d_s%nu_p = nu_p
+  param_2d_s%nu_q = nu_q
+  param_2d_s%nets = nets
+  param_2d_s%nete = nete
+  param_2d_s%rhs_multiplier = rhs_multiplier
+  param_2d_s%qsize = qsize
+  param_2d_s%qsize_d = qsize_d
+  param_2d_s%n0_qdp = n0_qdp
+  param_2d_s%np1_qdp = np1_qdp
+  param_2d_s%limiter_option = limiter_option
+  param_2d_s%rhs_viss = rhs_viss
+  call athread_spawn(slave_euler_v, param_2d_s)
+  call athread_join()
 
 #if 0
 #define PRINT_QDP

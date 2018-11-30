@@ -1,9 +1,10 @@
-subroutine limiter_optim_iter_full_f(ptens,sphweights,minp,maxp,dpmass)
+subroutine limiter_optim_iter_full_f(ptens,sphweights,minp,maxp,dpmass,k_n)
 implicit none
   integer, parameter :: np=4, nlev=30, real_kind = 8
-  real (kind=real_kind), dimension(nlev), intent(inout)   :: minp, maxp
-  real (kind=real_kind), dimension(np*np,nlev), intent(inout)   :: ptens
-  real (kind=real_kind), dimension(np*np,nlev), intent(in), optional  :: dpmass
+  integer, intent(in) :: k_n
+  real (kind=real_kind), dimension(k_n), intent(inout)   :: minp, maxp
+  real (kind=real_kind), dimension(np*np,k_n), intent(inout)   :: ptens
+  real (kind=real_kind), dimension(np*np,k_n), intent(in), optional  :: dpmass
   real (kind=real_kind), dimension(np*np), intent(in)   :: sphweights
 
   real (kind=real_kind), dimension(np,np) :: ptens_mass
@@ -13,7 +14,7 @@ implicit none
   integer :: maxiter = np*np-1
   real (kind=real_kind) :: tol_limiter = 5D-14
 
-  do k = 1, nlev
+  do k = 1, k_n
     do k1=1,np*np
       c(k1)=sphweights(k1)*dpmass(k1,k)
       x(k1)=ptens(k1,k)/dpmass(k1,k)
@@ -86,7 +87,7 @@ implicit none
     enddo
   enddo
 
-  do k = 1, nlev
+  do k = 1, k_n
     do k1=1,np*np
       ptens(k1,k)=ptens(k1,k)*dpmass(k1,k)
     enddo
