@@ -7,13 +7,17 @@ implicit none
   real (kind=real_kind), dimension(np*np,k_n), intent(in), optional  :: dpmass
   real (kind=real_kind), dimension(np*np), intent(in)   :: sphweights
 
+  real(kind=real_kind), dimension(80000) :: test
+
   real (kind=real_kind), dimension(np,np) :: ptens_mass
   integer  k1, k, i, j, iter, weightsnum
   real (kind=real_kind) :: addmass, weightssum, mass, sumc
   real (kind=real_kind) :: x(np*np),c(np*np)
-  integer :: maxiter = np*np-1
+  integer :: maxiter = np*np
   real (kind=real_kind) :: tol_limiter = 5D-14
 
+  print *, loc(ptens_mass)
+  test = 0.D0
   do k = 1, k_n
     do k1=1,np*np
       c(k1)=sphweights(k1)*dpmass(k1,k)

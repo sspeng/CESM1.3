@@ -3,10 +3,7 @@
 #include "ldm_alloc.h"
 #define NP 4
 #define NLEV 30
-#define UC 7         // a unit that divides nete by column direction
-#define UR 3         // a unit that divides qsize by row direcion
-#define NC 4
-#define NR 16
+#define KBLK  12
 #define west  1
 #define east  2
 #define south 3
@@ -17,10 +14,6 @@
 #define neast 8
 #define max_neigh_edges   8
 #define max_corner_elem   1
-#define block_Dinv        (2*2*NP*NP)
-#define block_tensor      (2*2*NP*NP)
-#define block_qtens       (UC*NLEV*NP*NP)
-#define qstep_qtens       (NLEV*NP*NP)
 
 #define abs(value, ret) asm volatile ("fcpys $31, %1, %0" : "=r"(ret) : "r"(value))
 
@@ -59,11 +52,11 @@ void slave_biharmonic_wk_scalar_2_(param_t *param_s) {
   int qsize = param_d.qsize;
   int step_elem = param_d.step_elem;
 
-  double Dinv[block_Dinv];
+  double Dinv[2*2*NP*NP];
   double Dvv[NP*NP];
   double variable_hyper[NP*NP];
-  double tensorVisc[block_tensor];
-  double qtens[block_qtens];
+  double tensorVisc[2*2*NP*NP];
+  double qtens[KBLK*NP*NP];
   double rspheremp[NP*NP];
   double spheremp[NP*NP];
   double lap_p[NP*NP];
@@ -72,8 +65,8 @@ void slave_biharmonic_wk_scalar_2_(param_t *param_s) {
   double v2[NP*NP];
   double vtemp[NP*NP*2];
   int getmap[max_neigh_edges];
-  double receive[UC*NLEV*NP];
-  double receive_1[UC*NLEV];
+  double receive[KBLK*NP];
+  double receive_1[KBLK];
 
   double dsdx00, dsdy00; int var_coef = 1;
   double oldgrads_1, oldgrads_2, tensor_1, tensor_2;
@@ -97,298 +90,256 @@ void slave_biharmonic_wk_scalar_2_(param_t *param_s) {
       *src_tensorVisc, *src_qtens, *src_receive;
   int *src_getmap;
 
-  rid = id / NC;
-  cid = id % NC;
-  int loop_r = ((nete - nets + 1) + UR*NR - 1)/(UR*NR);
-  int loop_c = (qsize + UC*NC - 1)/(UC*NC);
+  int sum_k = qsize*NLEV;
+  int istep_qmax = qsize*NLEV;
   int istep_qtens = qsize*NLEV*NP*NP;
-  int c, r, i, j, d, l, m, n, k, q, ie, cbeg, cend, rbeg, rend, cn, rn, pos_dp \
-      , pos_qdp, pos_Qtens_bi, pos_qmax;
+  int c, r, i, j, d, l, m, n, k, q, ie, k_beg, k_end, q_beg, q_end, k_n, q_n   \
+      , pos_dp, pos_qdp, pos_Qtens_bi, pos_qmax;
 
-  // Divide ie-axis data on the row cpe with loop_r
-  // the value of loop_r rely on NR, UR; NP is the number of cloumn cpe,
-  // UR is the unit that divides ie size by cloumn direcion,
-  // Divide q-axis data on the cloumn cpe with loop_c
-  // same as loop_r, the loop_c rely on NC, UC
-  // UC is the unit that divides q size by row direction
-  for (r = 0; r < loop_r; r++) {
-    rbeg = r*NR*UR + rid*UR;
-    rend = r*NR*UR + (rid + 1)*UR;
-    rend = rend < (nete - nets + 1) ? rend : (nete - nets + 1);
-    rn = rend - rbeg;
-    rn = rn < 0 ? 0 : rn;  // handling boundary issues, removing the case where rn < 0
-    for (ie = 0; ie < rn; ie++) {
-      src_Dinv = gl_Dinv + (rbeg + ie)*step_elem;
-      src_rspheremp = gl_rspheremp + (rbeg + ie)*step_elem;
-      src_spheremp = gl_spheremp + (rbeg + ie)*step_elem;
-      src_variable_hyper = gl_variable_hyper                 \
-          + (rbeg + ie)*step_elem;
-      src_tensorVisc = gl_tensorVisc + (rbeg + ie)*step_elem;
-      src_getmap = gl_getmap + (rbeg + ie)*max_neigh_edges;
-      pe_get(src_Dinv, Dinv, block_Dinv*sizeof(double));
-      pe_get(src_rspheremp, rspheremp, NP*NP*sizeof(double));
-      pe_get(src_spheremp, spheremp, NP*NP*sizeof(double));
-      pe_get(src_tensorVisc, tensorVisc, block_tensor*sizeof(double));
-      pe_get(src_variable_hyper, variable_hyper, NP*NP*sizeof(double));
-      pe_get(src_getmap, getmap, max_neigh_edges*sizeof(int));
+
+  for (ie = 0; ie < nete - nets + 1; ie++) {
+    // roll the q and k into the id of cpe,
+    // other words is that (q, k) has relationship with id
+    // be careful that the edge of possbilly exception
+    q_beg = KBLK*id/NLEV;
+    q_end = (KBLK*(id + 1))/NLEV;
+    q_end = q_end < qsize ? q_end : qsize;
+    k_beg = KBLK*id - q_beg*NLEV;
+    k_end = KBLK*(id + 1) - q_beg*NLEV;
+    k_end = k_end < NLEV ? k_end : NLEV;
+    k_n = k_end - k_beg;
+    q_n = (k_n == 6 && q_beg != (qsize - 1)) ? 1 : 0;
+    q_n = (id*KBLK > sum_k) ? -1 : q_n;
+
+    src_Dinv = gl_Dinv + ie*step_elem;
+    src_rspheremp = gl_rspheremp + ie*step_elem;
+    src_spheremp = gl_spheremp + ie*step_elem;
+    src_variable_hyper = gl_variable_hyper + ie*step_elem;
+    src_tensorVisc = gl_tensorVisc + ie*step_elem;
+    src_getmap = gl_getmap + ie*max_neigh_edges;
+    pe_get(src_Dinv, Dinv, 2*2*NP*NP*sizeof(double));
+    pe_get(src_rspheremp, rspheremp, NP*NP*sizeof(double));
+    pe_get(src_spheremp, spheremp, NP*NP*sizeof(double));
+    pe_get(src_tensorVisc, tensorVisc, 2*2*NP*NP*sizeof(double));
+    pe_get(src_variable_hyper, variable_hyper, NP*NP*sizeof(double));
+    pe_get(src_getmap, getmap, max_neigh_edges*sizeof(int));
+    dma_syn();
+    // is iee in iw is offset of edgebuf which has relationship with four direcion
+    // is iee in iw only has ie dimension
+    is = getmap[south - 1];
+    iee = getmap[east - 1];
+    in = getmap[north - 1];
+    iw = getmap[west - 1];
+
+    for (q = 0; q <= q_n; q++) {
+      src_qtens = gl_qtens + ie*istep_qtens + q_beg*NLEV*NP*NP                 \
+          + (k_beg + q*(q*NLEV - k_beg))*NP*NP;
+      pe_get(src_qtens, qtens, k_n*NP*NP*sizeof(double));
       dma_syn();
-      // is iee in iw is offset of edgebuf which has relationship with four direcion
-      // is iee in iw only has ie dimension
-      is = getmap[south - 1];
-      iee = getmap[east - 1];
-      in = getmap[north - 1];
-      iw = getmap[west - 1];
-      for (c = 0; c < loop_c; c++) {
-        cbeg = c*NC*UC + cid*UC;
-        cend = c*NC*UC + (cid + 1)*UC;
-        cend = cend < qsize ? cend : qsize;
-        cn = cend - cbeg;
-        if (cn > 0) {  // if cn < 0, the dma will get exceptional contribution
-          src_qtens = gl_qtens + (rbeg + ie)*istep_qtens + cbeg*qstep_qtens;
-          pe_get(src_qtens, qtens, block_qtens*sizeof(double));
+      // ------------------------- start of edgeVunpack ----------------------//
+      // ------------------------------- East --------------------------------//
+      src_receive = gl_receive + iee + q_beg*NLEV*NP + (k_beg + q*(q*NLEV - k_beg))*NP;
+      pe_get(src_receive, receive, k_n*NP*sizeof(double));
+      dma_syn();
+      for (k = 0; k < k_n; k++) {
+        for (i = 0; i < NP; i++) {
+          int pos_qtens = k*NP*NP + i*NP + (NP - 1);
+          int pos_receive = k*NP + i;
+          qtens[pos_qtens] = qtens[pos_qtens] + receive[pos_receive];
+        }
+      }
+      // ----------------------------- South ---------------------------------//
+      src_receive = gl_receive + is + q_beg*NLEV*NP + (k_beg + q*(q*NLEV - k_beg))*NP;
+      pe_get(src_receive, receive, k_n*NP*sizeof(double));
+      dma_syn();
+      for (k = 0; k < k_n; k++) {
+        for (i = 0; i < NP; i++) {
+          int pos_qtens = k*NP*NP + i;
+          int pos_receive = k*NP + i;
+          qtens[pos_qtens] = qtens[pos_qtens] + receive[pos_receive];
+        }
+      }
+      // ----------------------------- North ---------------------------------//
+      src_receive = gl_receive + in + q_beg*NLEV*NP + (k_beg + q*(q*NLEV - k_beg))*NP;
+      pe_get(src_receive, receive, k_n*NP*sizeof(double));
+      dma_syn();
+      for (k = 0; k < k_n; k++) {
+        for (i = 0; i < NP; i++) {
+          int pos_qtens = k*NP*NP + (NP - 1)*NP + i;
+          int pos_receive = k*NP + i;
+          qtens[pos_qtens] = qtens[pos_qtens] + receive[pos_receive];
+        }
+      }
+      // ----------------------------- West ----------------------------------//
+      src_receive = gl_receive + iw + q_beg*NLEV*NP + (k_beg + q*(q*NLEV - k_beg))*NP;
+      pe_get(src_receive, receive, k_n*NP*sizeof(double));
+      dma_syn();
+      for (k = 0; k < k_n; k++) {
+        for (i = 0; i < NP; i++) {
+          int pos_qtens = k*NP*NP + i*NP;
+          int pos_receive = k*NP + i;
+          qtens[pos_qtens] = qtens[pos_qtens] + receive[pos_receive];
+        }
+      }
+      // ----------------------- SWEST -------------------------------------- //
+      for (ll = swest - 1; ll < (swest + max_corner_elem - 1); ll++) {
+        if (getmap[ll] != -1) {
+          src_receive = gl_receive + getmap[ll] + q_beg*NLEV + (k_beg + q*(q*NLEV - k_beg));
+          pe_get(src_receive, receive_1, k_n*sizeof(double));
           dma_syn();
-          // ---------------------- start of edgeVunpack ---------------------//
-          // ------------------------------East ------------------------------//
-          src_receive = gl_receive + iee + cbeg*NLEV*NP;
-          pe_get(src_receive, receive, cn*NLEV*NP*sizeof(double));
+          for (k = 0; k < k_n; k++) {
+            int pos_qtens = k*NP*NP;
+            qtens[pos_qtens] = qtens[pos_qtens] + receive_1[k];
+          }
+        }
+      }  // end loop ll
+      // ----------------------- SEAST -------------------------------------- //
+      for (ll = swest + max_corner_elem - 1; ll < (swest + 2*max_corner_elem - 1); ll++) {
+        if (getmap[ll] != -1) {
+          src_receive = gl_receive + getmap[ll] + q_beg*NLEV + (k_beg + q*(q*NLEV - k_beg));
+          pe_get(src_receive, receive_1, k_n*sizeof(double));
           dma_syn();
-          for (q = 0; q < cn; q++) {
-            kptr = q*NLEV;
-            for (k = 0; k < NLEV; k++) {
-              iptr = NP*(kptr + k);
+          for (k = 0; k < k_n; k++) {
+            int pos_qtens = k*NP*NP + NP - 1;
+            qtens[pos_qtens] = qtens[pos_qtens] + receive_1[k];
+          }
+        }
+      }  // end loop ll
+      // ----------------------- NEAST -------------------------------------- //
+      for (ll = swest + 3*max_corner_elem - 1; ll < (swest + 4*max_corner_elem - 1); ll++) {
+        if (getmap[ll] != -1) {
+          src_receive = gl_receive + getmap[ll] + q_beg*NLEV + (k_beg + q*(q*NLEV - k_beg));
+          pe_get(src_receive, receive_1, k_n*sizeof(double));
+          dma_syn();
+          for (k = 0; k < k_n; k++) {
+            int pos_qtens = k*NP*NP + NP*(NP - 1) + NP - 1;
+            qtens[pos_qtens] = qtens[pos_qtens] + receive_1[k];
+          }
+        }
+      }  // end loop ll
+      // ----------------------------- NWEST -------------------------------- //
+      for (ll = swest + 2*max_corner_elem - 1; ll < (swest + 3*max_corner_elem - 1); ll++) {
+        if (getmap[ll] != -1) {
+          src_receive = gl_receive + getmap[ll] + q_beg*NLEV + (k_beg + q*(q*NLEV - k_beg));
+          pe_get(src_receive, receive_1, k_n*sizeof(double));
+          dma_syn();
+          for (k = 0; k < k_n; k++) {
+            int pos_qtens = k*NP*NP + NP*(NP - 1);
+            qtens[pos_qtens] = qtens[pos_qtens] + receive_1[k];
+          }
+        }
+      }  // end loop ll ----- end of edgeVunpack ----
+      // --------------- start gradient_sphere divergence_sphere -------------//
+      for (k = 0; k < k_n; k++) {
+        for (j = 0; j < NP; j++) {
+          for (i = 0; i < NP; i++) {
+            int pos = j*NP + i;
+            int pos_qtens = k*NP*NP + j*NP + i;
+            lap_p[pos] = rspheremp[pos]*qtens[pos_qtens];
+          }
+        }
+        for (j = 0; j < NP; j++) {  // start gradient_sphere
+          for (l = 0; l < NP; l++) {
+            dsdx00 = 0.0;
+            dsdy00 = 0.0;
+            for (i = 0; i < NP; i++) {
+              int pos_Dvv = l*NP + i;
+              int pos_lap_1 = j*NP + i;
+              int pos_lap_2 = i*NP + j;
+              dsdx00 = dsdx00 + Dvv[pos_Dvv]*lap_p[pos_lap_1];
+              dsdy00 = dsdy00 + Dvv[pos_Dvv]*lap_p[pos_lap_2];
+            }
+            int pos_v1 = j*NP + l;
+            int pos_v2 = l*NP + j;
+            v1[pos_v1] = dsdx00*rrearth;
+            v2[pos_v2] = dsdy00*rrearth;
+          }
+        }
+        for (j = 0; j < NP; j++) {
+          for (i = 0; i < NP; i++) {
+            int pos_grads_1 = j*NP + i;
+            int pos_grads_2 = NP*NP + j*NP + i;
+            int pos_v = j*NP + i;
+            int pos_Dinv_1 = j*NP + i;
+            int pos_Dinv_2 = NP*NP + j*NP + i;
+            int pos_Dinv_3 = 2*NP*NP + j*NP + i;
+            int pos_Dinv_4 = 3*NP*NP + j*NP + i;
+            grads[pos_grads_1] = Dinv[pos_Dinv_1]*v1[pos_v]                    \
+                + Dinv[pos_Dinv_2]*v2[pos_v];
+            grads[pos_grads_2] = Dinv[pos_Dinv_3]*v1[pos_v]                    \
+                + Dinv[pos_Dinv_4]*v2[pos_v];
+          }
+        }
+        if (var_coef) {
+          //if (id == 0)
+          //  printf("var_coef_in:%d\n", var_coef);
+          if (hypervis_power != 0) {
+            for (j = 0; j < NP; j++) {
               for (i = 0; i < NP; i++) {
-                int pos_qtens = q*NLEV*NP*NP + k*NP*NP + i*NP + (NP - 1);
-                int pos_receive = iptr + i;
-                qtens[pos_qtens] = qtens[pos_qtens] + receive[pos_receive];
+                int pos_grads_1 = j*NP + i;
+                int pos_grads_2 = NP*NP + j*NP + i;
+                int pos = j*NP + i;
+                grads[pos_grads_1] = grads[pos_grads_1]*variable_hyper[pos];
+                grads[pos_grads_2] = grads[pos_grads_2]*variable_hyper[pos];
+              }
+            }
+          } else if (hypervis_scaling != 0) {
+            for (j = 0; j < NP; j++) {
+              for (i = 0; i < NP; i++) {
+                int pos_grads_1 = j*NP + i;
+                int pos_grads_2 = NP*NP + j*NP + i;
+                int pos_tensor_1 = j*NP + i;
+                int pos_tensor_2 = NP*NP + j*NP + i;
+                int pos_tensor_3 = 2*NP*NP + j*NP + i;
+                int pos_tensor_4 = 3*NP*NP + j*NP + i;
+                oldgrads_1 = grads[pos_grads_1];
+                oldgrads_2 = grads[pos_grads_2];
+                grads[pos_grads_1] = oldgrads_1*tensorVisc[pos_tensor_1]       \
+                    + oldgrads_2*tensorVisc[pos_tensor_3];
+                grads[pos_grads_2] = oldgrads_1*tensorVisc[pos_tensor_2]       \
+                    + oldgrads_2*tensorVisc[pos_tensor_4];
               }
             }
           }
-          // ----------------------------- South ------------------------------//
-          src_receive = gl_receive + is + cbeg*NLEV*NP;
-          pe_get(src_receive, receive, cn*NLEV*NP*sizeof(double));
-          dma_syn();
-          for (q = 0; q < cn; q++) {
-            kptr = q*NLEV;
-            for (k = 0; k < NLEV; k++) {
-              iptr = NP*(kptr + k);
-              for (i = 0; i < NP; i++) {
-                int pos_qtens = q*NLEV*NP*NP + k*NP*NP + i;
-                int pos_receive = iptr + i;
-                qtens[pos_qtens] = qtens[pos_qtens] + receive[pos_receive];
-              }
+        }  // end of gradient_sphere
+        // start divergence_sphere_wk
+        for (j = 0; j < NP; j++) {
+          for (i = 0; i < NP; i++) {
+            int pos_1 = j*NP + i;
+            int pos_2 = NP*NP + j*NP + i;
+            int pos_Dinv_1 = j*NP + i;
+            int pos_Dinv_2 = NP*NP + j*NP + i;
+            int pos_Dinv_3 = 2*NP*NP + j*NP + i;
+            int pos_Dinv_4 = 3*NP*NP + j*NP + i;
+            vtemp[pos_1] = Dinv[pos_Dinv_1]*grads[pos_1]                       \
+                + Dinv[pos_Dinv_3]*grads[pos_2];
+            vtemp[pos_2] = Dinv[pos_Dinv_2]*grads[pos_1]                       \
+                + Dinv[pos_Dinv_4]*grads[pos_2];
+          }
+        }
+        for (n = 0; n < NP; n++) {
+          for (m = 0; m < NP; m++) {
+            int pos_qtens = k*NP*NP + n*NP + m;
+            qtens[pos_qtens] = 0;
+            for (j = 0; j < NP; j++) {
+              int pos_spheremp_1 = n*NP + j;
+              int pos_spheremp_2 = j*NP + m;
+              int pos_vtemp_1 = n*NP + j;
+              int pos_vtemp_2 = NP*NP + j*NP + m;
+              int pos_Dvv_1 = j*NP + m;
+              int pos_Dvv_2 = j*NP + n;
+              qtens[pos_qtens] = qtens[pos_qtens]
+                  - (spheremp[pos_spheremp_1]*vtemp[pos_vtemp_1]*Dvv[pos_Dvv_1]  \
+                  + spheremp[pos_spheremp_2]*vtemp[pos_vtemp_2]*Dvv[pos_Dvv_2])  \
+                  *rrearth;
             }
           }
-          // ----------------------------- North ------------------------------//
-          src_receive = gl_receive + in + cbeg*NLEV*NP;
-          pe_get(src_receive, receive, cn*NLEV*NP*sizeof(double));
-          dma_syn();
-          for (q = 0; q < cn; q++) {
-            kptr = q*NLEV;
-            for (k = 0; k < NLEV; k++) {
-              iptr = NP*(kptr + k);
-              for (i = 0; i < NP; i++) {
-                int pos_qtens = q*NLEV*NP*NP + k*NP*NP + (NP - 1)*NP + i;
-                int pos_receive = iptr + i;
-                qtens[pos_qtens] = qtens[pos_qtens] + receive[pos_receive];
-              }
-            }
-          }
-          // ----------------------------- West ------------------------------//
-          src_receive = gl_receive + iw + cbeg*NLEV*NP;
-          pe_get(src_receive, receive, cn*NLEV*NP*sizeof(double));
-          dma_syn();
-          for (q = 0; q < cn; q++) {
-            kptr = q*NLEV;
-            for (k = 0; k < NLEV; k++) {
-              iptr = NP*(kptr + k);
-              for (i = 0; i < NP; i++) {
-                int pos_qtens = q*NLEV*NP*NP + k*NP*NP + i*NP;
-                int pos_receive = iptr + i;
-                qtens[pos_qtens] = qtens[pos_qtens] + receive[pos_receive];
-              }
-            }
-          }
-          // ----------------------- SWEST -------------------------------- //
-          for (ll = swest - 1; ll < (swest + max_corner_elem - 1); ll++) {
-            if (getmap[ll] != -1) {
-              src_receive = gl_receive + getmap[ll] + cbeg*NLEV;
-              pe_get(src_receive, receive_1, cn*NLEV*sizeof(double));
-              dma_syn();
-              for (q = 0; q < cn; q++) {
-                kptr = q*NLEV;
-                for (k = 0; k < NLEV; k++) {
-                  iptr = (kptr + k);
-                  int pos_qtens = q*NLEV*NP*NP + k*NP*NP;
-                  qtens[pos_qtens] = qtens[pos_qtens] + receive_1[iptr];
-                }
-              }
-            }
-          }  // end loop ll
-          // ----------------------- SEAST -------------------------------- //
-          for (ll = swest + max_corner_elem - 1; ll < (swest + 2*max_corner_elem - 1); ll++) {
-            if (getmap[ll] != -1) {
-              src_receive = gl_receive + getmap[ll] + cbeg*NLEV;
-              pe_get(src_receive, receive_1, cn*NLEV*sizeof(double));
-              dma_syn();
-              for (q = 0; q < cn; q++) {
-                kptr = q*NLEV;
-                for (k = 0; k < NLEV; k++) {
-                  iptr = (kptr + k);
-                  int pos_qtens = q*NLEV*NP*NP + k*NP*NP + NP - 1;
-                  qtens[pos_qtens] = qtens[pos_qtens] + receive_1[iptr];
-                }
-              }
-            }
-          }  // end loop ll
-          // ----------------------- NEAST -------------------------------- //
-          for (ll = swest + 3*max_corner_elem - 1; ll < (swest + 4*max_corner_elem - 1); ll++) {
-            if (getmap[ll] != -1) {
-              src_receive = gl_receive + getmap[ll] + cbeg*NLEV;
-              pe_get(src_receive, receive_1, cn*NLEV*sizeof(double));
-              dma_syn();
-              for (q = 0; q < cn; q++) {
-                kptr = q*NLEV;
-                for (k = 0; k < NLEV; k++) {
-                  iptr = (kptr + k);
-                  int pos_qtens = q*NLEV*NP*NP + k*NP*NP + NP*(NP - 1) + NP - 1;
-                  qtens[pos_qtens] = qtens[pos_qtens] + receive_1[iptr];
-                }
-              }
-            }
-          }  // end loop ll
-          // ----------------------- NWEST -------------------------------- //
-          for (ll = swest + 2*max_corner_elem - 1; ll < (swest + 3*max_corner_elem - 1); ll++) {
-            if (getmap[ll] != -1) {
-              src_receive = gl_receive + getmap[ll] + cbeg*NLEV;
-              pe_get(src_receive, receive_1, cn*NLEV*sizeof(double));
-              dma_syn();
-              for (q = 0; q < cn; q++) {
-                kptr = q*NLEV;
-                for (k = 0; k < NLEV; k++) {
-                  iptr = (kptr + k);
-                  int pos_qtens = q*NLEV*NP*NP + k*NP*NP + NP*(NP - 1);
-                  qtens[pos_qtens] = qtens[pos_qtens] + receive_1[iptr];
-                }
-              }
-            }
-          }  // end loop ll ----- end of edgeVunpack ----
-
-          // ----------- start gradient_sphere divergence_sphere ------------//
-          for (q = 0; q < cn; q++) {
-            for (k = 0; k < NLEV; k++) {
-              for (j = 0; j < NP; j++) {
-                for (i = 0; i < NP; i++) {
-                  int pos = j*NP + i;
-                  int pos_qtens = q*NLEV*NP*NP + k*NP*NP + j*NP + i;
-                  lap_p[pos] = rspheremp[pos]*qtens[pos_qtens];
-                }
-              }
-              for (j = 0; j < NP; j++) {  // start gradient_sphere
-                for (l = 0; l < NP; l++) {
-                  dsdx00 = 0.0;
-                  dsdy00 = 0.0;
-                  for (i = 0; i < NP; i++) {
-                    int pos_Dvv = l*NP + i;
-                    int pos_lap_1 = j*NP + i;
-                    int pos_lap_2 = i*NP + j;
-                    dsdx00 = dsdx00 + Dvv[pos_Dvv]*lap_p[pos_lap_1];
-                    dsdy00 = dsdy00 + Dvv[pos_Dvv]*lap_p[pos_lap_2];
-                  }
-                  int pos_v1 = j*NP + l;
-                  int pos_v2 = l*NP + j;
-                  v1[pos_v1] = dsdx00*rrearth;
-                  v2[pos_v2] = dsdy00*rrearth;
-                }
-              }
-              for (j = 0; j < NP; j++) {
-                for (i = 0; i < NP; i++) {
-                  int pos_grads_1 = j*NP + i;
-                  int pos_grads_2 = NP*NP + j*NP + i;
-                  int pos_v = j*NP + i;
-                  int pos_Dinv_1 = j*NP + i;
-                  int pos_Dinv_2 = NP*NP + j*NP + i;
-                  int pos_Dinv_3 = 2*NP*NP + j*NP + i;
-                  int pos_Dinv_4 = 3*NP*NP + j*NP + i;
-                  grads[pos_grads_1] = Dinv[pos_Dinv_1]*v1[pos_v]              \
-                      + Dinv[pos_Dinv_2]*v2[pos_v];
-                  grads[pos_grads_2] = Dinv[pos_Dinv_3]*v1[pos_v]              \
-                      + Dinv[pos_Dinv_4]*v2[pos_v];
-                }
-              }
-              if (var_coef) {
-                //if (id == 0)
-                //  printf("var_coef_in:%d\n", var_coef);
-                if (hypervis_power != 0) {
-                  for (j = 0; j < NP; j++) {
-                    for (i = 0; i < NP; i++) {
-                      int pos_grads_1 = j*NP + i;
-                      int pos_grads_2 = NP*NP + j*NP + i;
-                      int pos = j*NP + i;
-                      grads[pos_grads_1] = grads[pos_grads_1]*variable_hyper[pos];
-                      grads[pos_grads_2] = grads[pos_grads_2]*variable_hyper[pos];
-                    }
-                  }
-                } else if (hypervis_scaling != 0) {
-                  for (j = 0; j < NP; j++) {
-                    for (i = 0; i < NP; i++) {
-                      int pos_grads_1 = j*NP + i;
-                      int pos_grads_2 = NP*NP + j*NP + i;
-                      int pos_tensor_1 = j*NP + i;
-                      int pos_tensor_2 = NP*NP + j*NP + i;
-                      int pos_tensor_3 = 2*NP*NP + j*NP + i;
-                      int pos_tensor_4 = 3*NP*NP + j*NP + i;
-                      oldgrads_1 = grads[pos_grads_1];
-                      oldgrads_2 = grads[pos_grads_2];
-                      grads[pos_grads_1] = oldgrads_1*tensorVisc[pos_tensor_1] \
-                          + oldgrads_2*tensorVisc[pos_tensor_3];
-                      grads[pos_grads_2] = oldgrads_1*tensorVisc[pos_tensor_2] \
-                          + oldgrads_2*tensorVisc[pos_tensor_4];
-                    }
-                  }
-                }
-              }  // end of gradient_sphere
-              // start divergence_sphere_wk
-              for (j = 0; j < NP; j++) {
-                for (i = 0; i < NP; i++) {
-                  int pos_1 = j*NP + i;
-                  int pos_2 = NP*NP + j*NP + i;
-                  int pos_Dinv_1 = j*NP + i;
-                  int pos_Dinv_2 = NP*NP + j*NP + i;
-                  int pos_Dinv_3 = 2*NP*NP + j*NP + i;
-                  int pos_Dinv_4 = 3*NP*NP + j*NP + i;
-                  vtemp[pos_1] = Dinv[pos_Dinv_1]*grads[pos_1]                 \
-                      + Dinv[pos_Dinv_3]*grads[pos_2];
-                  vtemp[pos_2] = Dinv[pos_Dinv_2]*grads[pos_1]                 \
-                      + Dinv[pos_Dinv_4]*grads[pos_2];
-                }
-              }
-              for (n = 0; n < NP; n++) {
-                for (m = 0; m < NP; m++) {
-                  int pos_qtens = q*NLEV*NP*NP + k*NP*NP + n*NP + m;
-                  qtens[pos_qtens] = 0;
-                  for (j = 0; j < NP; j++) {
-                    int pos_spheremp_1 = n*NP + j;
-                    int pos_spheremp_2 = j*NP + m;
-                    int pos_vtemp_1 = n*NP + j;
-                    int pos_vtemp_2 = NP*NP + j*NP + m;
-                    int pos_Dvv_1 = j*NP + m;
-                    int pos_Dvv_2 = j*NP + n;
-                    qtens[pos_qtens] = qtens[pos_qtens]
-                        - (spheremp[pos_spheremp_1]*vtemp[pos_vtemp_1]*Dvv[pos_Dvv_1]         \
-                        + spheremp[pos_spheremp_2]*vtemp[pos_vtemp_2]*Dvv[pos_Dvv_2])         \
-                        *rrearth;
-                  }
-                }
-              }  // end divergence_sphere_wk
-            }  // end loop k
-          }  // end loop q
-          pe_put(src_qtens, qtens, cn*NLEV*NP*NP*sizeof(double));
-          dma_syn();
-        }  // end if cn > 0
-      }  // end loop_c
-    }  // end ie
-  }  // end loop_r
-
+        }  // end divergence_sphere_wk
+      }  // end loop k
+      pe_put(src_qtens, qtens, k_n*NP*NP*sizeof(double));
+      dma_syn();
+    }  // end loop q
+  }  // end loop ie
 #if 0
   if (id == 0)
     printf("qsize:%d, var_coef:%d\n", qsize, var_coef);

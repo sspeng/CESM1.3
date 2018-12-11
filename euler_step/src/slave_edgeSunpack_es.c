@@ -3,10 +3,7 @@
 #include "ldm_alloc.h"
 #define NP 4
 #define NLEV 30
-#define UC 7         // a unit that divides nete by column direction
-#define UR 3         // a unit that divides qsize by row direcion
-#define NC 4
-#define NR 16
+#define KBLK  12
 #define west  1
 #define east  2
 #define south 3
@@ -17,10 +14,6 @@
 #define neast 8
 #define max_neigh_edges   8
 #define max_corner_elem   1
-#define block_Dinv        (2*2*NP*NP)
-#define block_tensor      (2*2*NP*NP)
-#define block_qtens       (UC*NLEV*NP*NP)
-#define qstep_qtens       (NLEV*NP*NP)
 
 #define MAX(val1, val2) ((val1) > (val2) ? (val1) : (val2))
 #define MIN(val1, val2) ((val1) < (val2) ? (val1) : (val2))
@@ -68,34 +61,46 @@ void slave_edgesunpack_es_(param_t *param_s) {
   int nete = param_d.nete;
   int qsize = param_d.qsize;
 
-  double qmax[NLEV];
-  double qmin[NLEV];
-  double receive[NLEV];
-  double receive_is[NLEV];
-  double receive_ie[NLEV];
-  double receive_in[NLEV];
-  double receive_iw[NLEV];
+  double qmax[KBLK];
+  double qmin[KBLK];
+  double receive[KBLK];
+  double receive_is[KBLK];
+  double receive_ie[KBLK];
+  double receive_in[KBLK];
+  double receive_iw[KBLK];
   int getmap[max_neigh_edges];
 
-  int k, n, ie, q, id_map, kptr, iptr, ll, is, iee, in, iw, ir;
-  int N = ((nete - nets + 1)*qsize + 64 - 1)/64;
+  int sum_k = qsize*NLEV;
+  int istep_qmax = qsize*NLEV;
+  
+  int k, n, ie, q, k_beg, k_end, k_n, q_beg, q_end, q_n, pos, kptr, iptr, ll    \
+      , is, iee, in, iw, ir;
 
   double *src_receive, *src_qmax, *src_qmin;
   int *src_getmap;
 
-  for (n = 0; n < N; n++) {
-    id_map = n*64 + id;
-    if (id_map < (nete - nets + 1)*qsize) {
-      ie = id_map/qsize;
-      q = id_map%qsize;
-      //if (id == 25) printf("%d\n", q);
-      //if (id == 1) printf("id:%d,id_map:%d,ie:%d,q:%d\n", id, id_map, ie, q);
+  for (ie = 0; ie < nete - nets + 1; ie++) {
+    // roll the q and k into the id of cpe,
+    // other words is that (q, k) has relationship with id
+    // be careful that the edge of possbilly exception
+    q_beg = KBLK*id/NLEV;
+    q_end = (KBLK*(id + 1))/NLEV;
+    q_end = q_end < qsize ? q_end : qsize;
+    k_beg = KBLK*id - q_beg*NLEV;
+    k_end = KBLK*(id + 1) - q_beg*NLEV;
+    k_end = k_end < NLEV ? k_end : NLEV;
+    k_n = k_end - k_beg;
+    q_n = (k_n == 6 && q_beg != (qsize - 1)) ? 1 : 0;
+    q_n = (id*KBLK > sum_k) ? -1 : q_n;
+    for (q = 0; q <= q_n; q++) {
       src_getmap = gl_getmap + ie*max_neigh_edges;
-      src_qmax = gl_qmax + ie*qsize*NLEV + q*NLEV;
-      src_qmin = gl_qmin + ie*qsize*NLEV + q*NLEV;
+      src_qmax = gl_qmax + ie*istep_qmax + q_beg*NLEV                          \
+          + (k_beg + q*(q*NLEV - k_beg)); // (k_beg + q*(q*NLEV - k_beg)) could be 0 12 24 0 6 18 0
+      src_qmin = gl_qmin + ie*istep_qmax + q_beg*NLEV                          \
+          + (k_beg + q*(q*NLEV - k_beg));
       pe_get(src_getmap, getmap, max_neigh_edges*sizeof(int));
-      pe_get(src_qmax, qmax, NLEV*sizeof(double));
-      pe_get(src_qmin, qmin, NLEV*sizeof(double));
+      pe_get(src_qmax, qmax, k_n*sizeof(double));
+      pe_get(src_qmin, qmin, k_n*sizeof(double));
       dma_syn();
 
       is  = getmap[south - 1];
@@ -103,49 +108,51 @@ void slave_edgesunpack_es_(param_t *param_s) {
       in  = getmap[north - 1];
       iw  = getmap[west - 1];
 
-      src_receive = gl_receive + iee + q*NLEV;
-      pe_get(src_receive, receive_ie, NLEV*sizeof(double));
+      src_receive = gl_receive + iee + q_beg*NLEV + (k_beg + q*(q*NLEV - k_beg));
+      pe_get(src_receive, receive_ie, k_n*sizeof(double));
       dma_syn();
-      src_receive = gl_receive + is + q*NLEV;
-      pe_get(src_receive, receive_is, NLEV*sizeof(double));
+      src_receive = gl_receive + is + q_beg*NLEV + (k_beg + q*(q*NLEV - k_beg));
+      pe_get(src_receive, receive_is, k_n*sizeof(double));
       dma_syn();
-      src_receive = gl_receive + iw + q*NLEV;
-      pe_get(src_receive, receive_iw, NLEV*sizeof(double));
+      src_receive = gl_receive + iw + q_beg*NLEV + (k_beg + q*(q*NLEV - k_beg));
+      pe_get(src_receive, receive_iw, k_n*sizeof(double));
       dma_syn();
-      src_receive = gl_receive + in + q*NLEV;
-      pe_get(src_receive, receive_in, NLEV*sizeof(double));
+      src_receive = gl_receive + in + q_beg*NLEV + (k_beg + q*(q*NLEV - k_beg));
+      pe_get(src_receive, receive_in, k_n*sizeof(double));
       dma_syn();
-      for (k = 0; k < NLEV; k++) {
+      for (k = 0; k < k_n; k++) {
         MIN5(qmin[k], receive_ie[k], receive_is[k], receive_iw[k], receive_in[k]);
       }
-      src_receive = gl_receive + iee + q*NLEV + qsize*NLEV;
-      pe_get(src_receive, receive_ie, NLEV*sizeof(double));
+      src_receive = gl_receive + iee + q_beg*NLEV + (k_beg + q*(q*NLEV - k_beg)) + qsize*NLEV;
+      pe_get(src_receive, receive_ie, k_n*sizeof(double));
       dma_syn();
-      src_receive = gl_receive + is + q*NLEV + qsize*NLEV;
-      pe_get(src_receive, receive_is, NLEV*sizeof(double));
+      src_receive = gl_receive + is + q_beg*NLEV + (k_beg + q*(q*NLEV - k_beg)) + qsize*NLEV;
+      pe_get(src_receive, receive_is, k_n*sizeof(double));
       dma_syn();
-      src_receive = gl_receive + iw + q*NLEV + qsize*NLEV;
-      pe_get(src_receive, receive_iw, NLEV*sizeof(double));
+      src_receive = gl_receive + iw + q_beg*NLEV + (k_beg + q*(q*NLEV - k_beg)) + qsize*NLEV;
+      pe_get(src_receive, receive_iw, k_n*sizeof(double));
       dma_syn();
-      src_receive = gl_receive + in + q*NLEV + qsize*NLEV;
-      pe_get(src_receive, receive_in, NLEV*sizeof(double));
+      src_receive = gl_receive + in + q_beg*NLEV + (k_beg + q*(q*NLEV - k_beg)) + qsize*NLEV;
+      pe_get(src_receive, receive_in, k_n*sizeof(double));
       dma_syn();
-      for (k = 0; k < NLEV; k++) {
+      for (k = 0; k < k_n; k++) {
         MAX5(qmax[k], receive_ie[k], receive_is[k], receive_iw[k], receive_in[k]);
       }
       // ---------------------------- SWEST ----------------------------------//
       for (ll = swest - 1; ll < (swest + max_corner_elem - 1); ll++) {
         if (getmap[ll] != -1) {
-          src_receive = gl_receive + getmap[ll] + q*NLEV;
-          pe_get(src_receive, receive, NLEV*sizeof(double));
+          src_receive = gl_receive + getmap[ll] + q_beg*NLEV                   \
+              + (k_beg + q*(q*NLEV - k_beg));
+          pe_get(src_receive, receive, k_n*sizeof(double));
           dma_syn();
-          for (k = 0; k < NLEV; k++) {
+          for (k = 0; k < k_n; k++) {
             qmin[k] = MIN(qmin[k], receive[k]);
           }
-          src_receive = gl_receive + getmap[ll] + q*NLEV + qsize*NLEV;
-          pe_get(src_receive, receive, NLEV*sizeof(double));
+          src_receive = gl_receive + getmap[ll] + q_beg*NLEV                   \
+              + (k_beg + q*(q*NLEV - k_beg)) + qsize*NLEV;
+          pe_get(src_receive, receive, k_n*sizeof(double));
           dma_syn();
-          for (k = 0; k < NLEV; k++) {
+          for (k = 0; k < k_n; k++) {
             qmax[k] = MAX(qmax[k], receive[k]);
           }
         }
@@ -153,16 +160,18 @@ void slave_edgesunpack_es_(param_t *param_s) {
       // ---------------------------- SEAST ----------------------------------//
       for (ll = swest + max_corner_elem - 1; ll < (swest + 2*max_corner_elem - 1); ll++) {
         if (getmap[ll] != -1) {
-          src_receive = gl_receive + getmap[ll] + q*NLEV;
-          pe_get(src_receive, receive, NLEV*sizeof(double));
+          src_receive = gl_receive + getmap[ll] + q_beg*NLEV                   \
+              + (k_beg + q*(q*NLEV - k_beg));
+          pe_get(src_receive, receive, k_n*sizeof(double));
           dma_syn();
-          for (k = 0; k < NLEV; k++) {
+          for (k = 0; k < k_n; k++) {
             qmin[k] = MIN(qmin[k], receive[k]);
           }
-          src_receive = gl_receive + getmap[ll] + q*NLEV + qsize*NLEV;
-          pe_get(src_receive, receive, NLEV*sizeof(double));
+          src_receive = gl_receive + getmap[ll] + q_beg*NLEV                   \
+              + (k_beg + q*(q*NLEV - k_beg)) + qsize*NLEV;
+          pe_get(src_receive, receive, k_n*sizeof(double));
           dma_syn();
-          for (k = 0; k < NLEV; k++) {
+          for (k = 0; k < k_n; k++) {
             qmax[k] = MAX(qmax[k], receive[k]);
           }
         }
@@ -170,16 +179,18 @@ void slave_edgesunpack_es_(param_t *param_s) {
       // ----------------------- NEAST -------------------------------- //
       for (ll = swest + 3*max_corner_elem - 1; ll < (swest + 4*max_corner_elem - 1); ll++) {
         if (getmap[ll] != -1) {
-          src_receive = gl_receive + getmap[ll] + q*NLEV;
-          pe_get(src_receive, receive, NLEV*sizeof(double));
+          src_receive = gl_receive + getmap[ll] + q_beg*NLEV                   \
+              + (k_beg + q*(q*NLEV - k_beg));
+          pe_get(src_receive, receive, k_n*sizeof(double));
           dma_syn();
-          for (k = 0; k < NLEV; k++) {
+          for (k = 0; k < k_n; k++) {
             qmin[k] = MIN(qmin[k], receive[k]);
           }
-          src_receive = gl_receive + getmap[ll] + q*NLEV + qsize*NLEV;
-          pe_get(src_receive, receive, NLEV*sizeof(double));
+          src_receive = gl_receive + getmap[ll] + q_beg*NLEV                   \
+              + (k_beg + q*(q*NLEV - k_beg)) + qsize*NLEV;
+          pe_get(src_receive, receive, k_n*sizeof(double));
           dma_syn();
-          for (k = 0; k < NLEV; k++) {
+          for (k = 0; k < k_n; k++) {
             qmax[k] = MAX(qmax[k], receive[k]);
           }
         }
@@ -187,26 +198,28 @@ void slave_edgesunpack_es_(param_t *param_s) {
       // ----------------------- NWEST -------------------------------- //
       for (ll = swest + 2*max_corner_elem - 1; ll < (swest + 3*max_corner_elem - 1); ll++) {
         if (getmap[ll] != -1) {
-          src_receive = gl_receive + getmap[ll] + q*NLEV;
-          pe_get(src_receive, receive, NLEV*sizeof(double));
+          src_receive = gl_receive + getmap[ll] + q_beg*NLEV                   \
+              + (k_beg + q*(q*NLEV - k_beg));
+          pe_get(src_receive, receive, k_n*sizeof(double));
           dma_syn();
-          for (k = 0; k < NLEV; k++) {
+          for (k = 0; k < k_n; k++) {
             qmin[k] = MIN(qmin[k], receive[k]);
           }
-          src_receive = gl_receive + getmap[ll] + q*NLEV + qsize*NLEV;
-          pe_get(src_receive, receive, NLEV*sizeof(double));
+          src_receive = gl_receive + getmap[ll] + q_beg*NLEV                   \
+              + (k_beg + q*(q*NLEV - k_beg)) + qsize*NLEV;
+          pe_get(src_receive, receive, k_n*sizeof(double));
           dma_syn();
-          for (k = 0; k < NLEV; k++) {
+          for (k = 0; k < k_n; k++) {
             qmax[k] = MAX(qmax[k], receive[k]);
           }
         }
       } // end loop ll
-      for (k = 0; k < NLEV; k++) {
+      for (k = 0; k < k_n; k++) {
         qmin[k] = MAX(qmin[k], 0.0);
       }
-      pe_put(src_qmin, qmin, NLEV*sizeof(double));
-      pe_put(src_qmax, qmax, NLEV*sizeof(double));
+      pe_put(src_qmin, qmin, k_n*sizeof(double));
+      pe_put(src_qmax, qmax, k_n*sizeof(double));
       dma_syn();
-    } // end if
-  } // end loop n
+    }
+  }
 }

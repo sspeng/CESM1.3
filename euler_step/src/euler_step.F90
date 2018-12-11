@@ -182,6 +182,7 @@ implicit none
   integer :: rkstage = 3
   integer :: qbeg, qend, kbeg, kend
   integer :: kptr
+  real(kind=real_kind) :: time_s, time_e
   real(kind=real_kind) :: nu_p = 0.0D5
   real(kind=real_kind) :: nu_q = -1
   type(element_t) :: elem_test(43)
@@ -204,6 +205,7 @@ implicit none
     integer :: nets, nete, np1_qdp, n0_qdp, DSSopt, rhs_multiplier, qsize, qsize_d
   end type param_t
   type(param_t) :: param_s
+
   external :: slave_euler_v
   type param_2d_t
     integer*8 :: qdp_s_ptr, qdp_leap_ptr, divdp_proj, dp, vn0, Dvv, Dinv         \
@@ -261,7 +263,7 @@ interface
       edgeAdv%reverse(i, ie) = .true.
     enddo
   enddo
-  !call biharmonic_wk_scalar(elem, Qtens_biharmonic, deriv, edgeAdv, hybrid, nets, nete)
+  call biharmonic_wk_scalar(elem, Qtens_biharmonic, deriv, edgeAdv, hybrid, nets, nete)
   !call neighbor_minmax(hybrid, edgeAdv, nets, nete, qmin, qmax)
 
   !param_s%qdp = loc(elem(nets)%state%Qdp)
@@ -321,8 +323,11 @@ interface
   param_2d_s%np1_qdp = np1_qdp
   param_2d_s%limiter_option = limiter_option
   param_2d_s%rhs_viss = rhs_viss
+  call cpu_time(time_s)
   call athread_spawn(slave_euler_v, param_2d_s)
   call athread_join()
+  call cpu_time(time_e)
+  print *, ">>>>>>>>>>>>>time:" , time_e - time_s
 
 #if 0
 #define PRINT_QDP
@@ -554,14 +559,14 @@ param_edgeSpack_s%qsize = qsize
 call athread_spawn(slave_edgespack_es, param_edgeSpack_s)
 call athread_join()
 
-param_edgeSunpack_s%qmax = loc(max_neigh)
-param_edgeSunpack_s%qmin = loc(min_neigh)
-param_edgeSunpack_s%receive = loc(edgeMinMax%receive)
-param_edgeSunpack_s%getmap = loc(edgeMinMax%getmap(1,nets))
-param_edgeSunpack_s%nets = nets
-param_edgeSunpack_s%nete = nete
-param_edgeSunpack_s%qsize = qsize
-call athread_spawn(slave_edgesunpack_es, param_edgeSunpack_s)
-call athread_join()
-print *, "hello"
+!param_edgeSunpack_s%qmax = loc(max_neigh)
+!param_edgeSunpack_s%qmin = loc(min_neigh)
+!param_edgeSunpack_s%receive = loc(edgeMinMax%receive)
+!param_edgeSunpack_s%getmap = loc(edgeMinMax%getmap(1,nets))
+!param_edgeSunpack_s%nets = nets
+!param_edgeSunpack_s%nete = nete
+!param_edgeSunpack_s%qsize = qsize
+!call athread_spawn(slave_edgesunpack_es, param_edgeSunpack_s)
+!call athread_join()
+!print *, "hello"
 end subroutine neighbor_minmax
