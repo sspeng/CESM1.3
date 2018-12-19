@@ -217,6 +217,21 @@ implicit none
   end type param_2d_t
   type(param_2d_t) :: param_2d_s
 
+  external :: slave_compute_overlap
+  type param_compute_t
+    integer*8 :: Qtens_biharmonic, spheremp, dp0
+    real(kind=real_kind) :: dt, nu_q
+    integer :: nets, nete, qsize, step_elem, rhs_viss
+  end type param_compute_t
+  type(param_compute_t) :: param_compute_s
+
+  external :: slave_rhs_multiplier
+  type param_rsh_t
+    integer*8 :: Qtens_biharmonic, dpdiss_ave, dp0
+    integer :: nets, nete, qsize, step_elem
+  end type param_rsh_t
+  type(param_rsh_t) :: param_rhs_s
+
   interface
     subroutine biharmonic_wk_scalar(elem, Qtens_biharmonic, deriv, edgeAdv, hybrid, nets, nete)
       use kinds , only: real_kind
@@ -244,6 +259,17 @@ interface
       integer :: nets, nete
     end subroutine neighbor_minmax
   end interface
+
+  interface
+    subroutine edgeVpack(elem, edgeAdvp1, nets, nete, np1_qdp, DSSopt)
+      use kinds , only: real_kind
+      use element_mod, only: element_t
+      use edgetype_mod, only: EdgeBuffer_t
+      type(element_t) :: elem(:)
+      type(EdgeBuffer_t) :: edgeAdvp1
+      integer :: nets, nete, np1_qdp, DSSopt
+    end subroutine edgeVpack
+  end interface
   do i = 1, 5
     call counter(count)
   enddo
@@ -263,8 +289,8 @@ interface
       edgeAdv%reverse(i, ie) = .true.
     enddo
   enddo
-  call biharmonic_wk_scalar(elem, Qtens_biharmonic, deriv, edgeAdv, hybrid, nets, nete)
-  !call neighbor_minmax(hybrid, edgeAdv, nets, nete, qmin, qmax)
+  !call biharmonic_wk_scalar(elem, Qtens_biharmonic, deriv, edgeAdv, hybrid, nets, nete)
+  call edgeVpack(elem, edgeAdv, nets, nete, np1_qdp, DSSopt)
 
   !param_s%qdp = loc(elem(nets)%state%Qdp)
   !param_s%rkstage = rkstage
@@ -295,39 +321,61 @@ interface
   !param_s%qsize_d = qsize_d
   !call athread_spawn(slave_euler_step, param_s)
   !call athread_join()
-  param_2d_s%qdp_s_ptr = loc(elem(nets)%state%Qdp(:,:,:,:,:))
-  param_2d_s%qdp_leap_ptr = loc(elem((nets+1))%state%Qdp(:,:,:,:,:))
-  param_2d_s%divdp_proj = loc(elem(nets)%derived%divdp_proj(:,:,:))
-  param_2d_s%dp = loc(elem(nets)%derived%dp(:,:,:))
-  param_2d_s%vn0 = loc(elem(nets)%derived%vn0(:,:,:,:))
-  param_2d_s%Dvv = loc(deriv%Dvv)
-  param_2d_s%Dinv = loc(elem(nets)%Dinv(:,:,:,:))
-  param_2d_s%metdet = loc(elem(nets)%metdet(:,:))
-  param_2d_s%rmetdet = loc(elem(nets)%rmetdet(:,:))
-  param_2d_s%Qtens_biharmonic = loc(Qtens_biharmonic(1,1,1,1,nets))
-  param_2d_s%divdp = loc(elem(nets)%derived%divdp)
-  param_2d_s%dpdiss_biharmonic = loc(elem(nets)%derived%dpdiss_biharmonic)
-  param_2d_s%spheremp = loc(elem(nets)%spheremp)
-  param_2d_s%qmax = loc(qmax(1,1,nets))
-  param_2d_s%qmin = loc(qmin(1,1,nets))
-  param_2d_s%dt = dt
-  param_2d_s%rrearth = rrearth
-  param_2d_s%nu_p = nu_p
-  param_2d_s%nu_q = nu_q
-  param_2d_s%nets = nets
-  param_2d_s%nete = nete
-  param_2d_s%rhs_multiplier = rhs_multiplier
-  param_2d_s%qsize = qsize
-  param_2d_s%qsize_d = qsize_d
-  param_2d_s%n0_qdp = n0_qdp
-  param_2d_s%np1_qdp = np1_qdp
-  param_2d_s%limiter_option = limiter_option
-  param_2d_s%rhs_viss = rhs_viss
-  call cpu_time(time_s)
-  call athread_spawn(slave_euler_v, param_2d_s)
-  call athread_join()
-  call cpu_time(time_e)
-  print *, ">>>>>>>>>>>>>time:" , time_e - time_s
+  !param_2d_s%qdp_s_ptr = loc(elem(nets)%state%Qdp(:,:,:,:,:))
+  !param_2d_s%qdp_leap_ptr = loc(elem((nets+1))%state%Qdp(:,:,:,:,:))
+  !param_2d_s%divdp_proj = loc(elem(nets)%derived%divdp_proj(:,:,:))
+  !param_2d_s%dp = loc(elem(nets)%derived%dp(:,:,:))
+  !param_2d_s%vn0 = loc(elem(nets)%derived%vn0(:,:,:,:))
+  !param_2d_s%Dvv = loc(deriv%Dvv)
+  !param_2d_s%Dinv = loc(elem(nets)%Dinv(:,:,:,:))
+  !param_2d_s%metdet = loc(elem(nets)%metdet(:,:))
+  !param_2d_s%rmetdet = loc(elem(nets)%rmetdet(:,:))
+  !param_2d_s%Qtens_biharmonic = loc(Qtens_biharmonic(1,1,1,1,nets))
+  !param_2d_s%divdp = loc(elem(nets)%derived%divdp)
+  !param_2d_s%dpdiss_biharmonic = loc(elem(nets)%derived%dpdiss_biharmonic)
+  !param_2d_s%spheremp = loc(elem(nets)%spheremp)
+  !param_2d_s%qmax = loc(qmax(1,1,nets))
+  !param_2d_s%qmin = loc(qmin(1,1,nets))
+  !param_2d_s%dt = dt
+  !param_2d_s%rrearth = rrearth
+  !param_2d_s%nu_p = nu_p
+  !param_2d_s%nu_q = nu_q
+  !param_2d_s%nets = nets
+  !param_2d_s%nete = nete
+  !param_2d_s%rhs_multiplier = rhs_multiplier
+  !param_2d_s%qsize = qsize
+  !param_2d_s%qsize_d = qsize_d
+  !param_2d_s%n0_qdp = n0_qdp
+  !param_2d_s%np1_qdp = np1_qdp
+  !param_2d_s%limiter_option = limiter_option
+  !param_2d_s%rhs_viss = rhs_viss
+  !call cpu_time(time_s)
+  !call athread_spawn(slave_euler_v, param_2d_s)
+  !call athread_join()
+  !call cpu_time(time_e)
+  !print *, ">>>>>>>>>>>>>time:" , time_e - time_s
+  !param_compute_s%Qtens_biharmonic = loc(Qtens_biharmonic(1,1,1,1,nets))
+  !param_compute_s%spheremp = loc(elem(nets)%spheremp)
+  !param_compute_s%dp0 = loc(dp0)
+  !param_compute_s%dt = dt;
+  !param_compute_s%nu_q = nu_q
+  !param_compute_s%nets = nets
+  !param_compute_s%nete = nete
+  !param_compute_s%qsize = qsize
+  !param_compute_s%step_elem = (loc(elem(nets+1)%spheremp) - loc(elem(nets)%spheremp))/8
+  !param_compute_s%rhs_viss = rhs_viss
+  !call athread_spawn(slave_compute_overlap, param_compute_s)
+  !call athread_join()
+!
+  !param_rhs_s%Qtens_biharmonic = loc(Qtens_biharmonic(1,1,1,1,nets))
+  !param_rhs_s%dpdiss_ave = loc(elem(nets)%derived%dpdiss_ave)
+  !param_rhs_s%dp0 = loc(dp0)
+  !param_rhs_s%nets = nets
+  !param_rhs_s%nete = nete
+  !param_rhs_s%qsize = qsize
+  !param_rhs_s%step_elem = (loc(elem(nets+1)%derived%dpdiss_ave) - loc(elem(nets)%derived%dpdiss_ave))/8
+  !call athread_spawn(slave_rhs_multiplier, param_rhs_s)
+  !call athread_join()
 
 #if 0
 #define PRINT_QDP
@@ -570,3 +618,118 @@ call athread_join()
 !call athread_join()
 !print *, "hello"
 end subroutine neighbor_minmax
+
+
+subroutine edgeVpack(elem, edgeAdvp1, nets, nete, np1_qdp, DSSopt)
+use kinds , only: real_kind
+use physical_constants, only: rrearth
+use element_mod, only: element_t
+use control_mod, only : north, south, east, west, neast, nwest, seast, swest
+use dimensions_mod, only: np, npdg, nlev, qsize, max_corner_elem, max_neigh_edges, nelemd
+use hybvcoord_mod, only:hvcoord_t
+use hybrid_mod, only: hybrid_t
+use derivative_mod, only: derivative_t
+use edgetype_mod, only       : EdgeBuffer_t
+use control_mod, only : hypervis_scaling, hypervis_power
+implicit none
+
+  type(EdgeBuffer_t),  intent(inout) :: edgeAdvp1
+  type(element_t), intent(inout), target :: elem(:)
+  integer :: nets, nete, np1_qdp, DSSopt
+  integer :: reverse(4, nets:nete)
+
+  ! local
+  integer :: ie,k,q
+  integer :: kblk,qblk,kptr
+
+  external :: slave_edgevpack_es
+  type param_edgeVpack_t
+    integer*8 :: v1, v2, spheremp, buf
+    integer*8 :: putmap, reverse
+    integer :: nets, nete, qsize, step_elem
+  end type param_edgeVpack_t
+  type(param_edgeVpack_t) :: param_edgeVpack_s
+
+  external :: slave_edgevunpack_es
+  type param_edgeVunpack_t
+    integer*8 :: v1, v2, rspheremp, receive
+    integer*8 :: getmap
+    integer :: nets, nete, qsize, step_elem
+  end type param_edgeVunpack_t
+  type(param_edgeVunpack_t) :: param_edgeVunpack_s
+  !external :: slave_edgesunpack_es
+  !type param_edgeSunpack_t
+  !  integer*8 :: qmax, qmin, receive
+  !  integer*8 :: getmap
+  !  integer :: nets, nete, qsize
+  !end type param_edgeSunpack_t
+  !type(param_edgeSunpack_t) :: param_edgeSunpack_s
+
+
+  integer,parameter :: DSSeta = 1
+  integer,parameter :: DSSomega = 2
+  integer,parameter :: DSSdiv_vdp_ave = 3
+  integer,parameter :: DSSno_var = -1
+
+  do ie = nets, nete
+    if (edgeAdvp1%reverse(west, ie)) then
+      reverse(1, ie) = 1
+    else
+      reverse(1, ie) = 0
+    endif
+    if (edgeAdvp1%reverse(east, ie)) then
+      reverse(2, ie) = 1
+    else
+      reverse(2, ie) = 0
+    endif
+    if (edgeAdvp1%reverse(south, ie)) then
+      reverse(3, ie) = 1
+    else
+      reverse(3, ie) = 0
+    endif
+    if (edgeAdvp1%reverse(north, ie)) then
+      reverse(4, ie) = 1
+    else
+      reverse(4, ie) = 0
+    endif
+  enddo
+
+  param_edgeVpack_s%v1 = loc(elem(nets)%state%Qdp(1,1,1,1,np1_qdp))
+  param_edgeVpack_s%spheremp = loc(elem(nets)%spheremp)
+  param_edgeVpack_s%buf = loc(edgeAdvp1%buf)
+  param_edgeVpack_s%putmap = loc(edgeAdvp1%putmap(1,nets))
+  param_edgeVpack_s%reverse = loc(reverse)
+  param_edgeVpack_s%nets = nets
+  param_edgeVpack_s%nete = nete
+  param_edgeVpack_s%qsize = qsize
+  param_edgeVpack_s%step_elem = (loc(elem(nets+1)%spheremp) - loc(elem(nets)%spheremp))/8
+  if ( DSSopt == DSSeta         ) param_edgeVpack_s%v2 = loc(elem(nets)%derived%eta_dot_dpdn)
+  if ( DSSopt == DSSomega       ) param_edgeVpack_s%v2 = loc(elem(nets)%derived%omega_p)
+  if ( DSSopt == DSSdiv_vdp_ave ) param_edgeVpack_s%v2 = loc(elem(nets)%derived%divdp_proj)
+  call athread_spawn(slave_edgevpack_es, param_edgeVpack_s)
+  call athread_join()
+  param_edgeVunpack_s%v1 = loc(elem(nets)%state%Qdp(1,1,1,1,np1_qdp))
+  if ( DSSopt == DSSeta         ) param_edgeVunpack_s%v2 = loc(elem(nets)%derived%eta_dot_dpdn)
+  if ( DSSopt == DSSomega       ) param_edgeVunpack_s%v2 = loc(elem(nets)%derived%omega_p)
+  if ( DSSopt == DSSdiv_vdp_ave ) param_edgeVunpack_s%v2 = loc(elem(nets)%derived%divdp_proj)
+  param_edgeVunpack_s%rspheremp = loc(elem(nets)%rspheremp)
+  param_edgeVunpack_s%receive = loc(edgeAdvp1%receive)
+  param_edgeVunpack_s%getmap = loc(edgeAdvp1%getmap(1,nets))
+  param_edgeVunpack_s%nets = nets
+  param_edgeVunpack_s%nete = nete
+  param_edgeVunpack_s%qsize = qsize
+  param_edgeVunpack_s%step_elem = (loc(elem(nets+1)%spheremp) - loc(elem(nets)%spheremp))/8
+  call athread_spawn(slave_edgevunpack_es, param_edgeVunpack_s)
+  call athread_join()
+
+  !param_edgeSunpack_s%qmax = loc(max_neigh)
+  !param_edgeSunpack_s%qmin = loc(min_neigh)
+  !param_edgeSunpack_s%receive = loc(edgeMinMax%receive)
+  !param_edgeSunpack_s%getmap = loc(edgeMinMax%getmap(1,nets))
+  !param_edgeSunpack_s%nets = nets
+  !param_edgeSunpack_s%nete = nete
+  !param_edgeSunpack_s%qsize = qsize
+  !call athread_spawn(slave_edgesunpack_es, param_edgeSunpack_s)
+  !call athread_join()
+  !print *, "hello"
+end subroutine edgeVpack

@@ -3,12 +3,7 @@
 #include "ldm_alloc.h"
 #define NP 4
 #define NLEV 30
-#define UC 4         // a unit that divides nete by column direction
-#define UR 3         // a unit that divides qsize by row direcion
-#define NC 8
-#define NR 8
-#define qstep_Qten (NLEV*NP*NP)       // stripe in q axis of Qtens_biharmonic array
-#define block  (UC*NLEV*NP*NP)
+#define KBLK  12
 
 
 #define get_row_id(rid) asm volatile ("rcsr %0, 1" : "=r"(rid))
@@ -48,9 +43,11 @@ void slave_compute_overlap_(param_t *param_s) {
   int step_elem = param_d.step_elem;
   int rhs_viss = param_d.rhs_viss;
 
-  double Qtens_biharmonic[block];
+  double Qtens_biharmonic[KBLK*NP*NP];
   double spheremp[NP*NP];
   double dp0[NLEV];
+
+  int sum_k = qsize*NLEV;
 
 #if 0
   if (id == 0) {
@@ -62,54 +59,50 @@ void slave_compute_overlap_(param_t *param_s) {
 
   double *src_Qtens_biharmonic, *src_spheremp, *src_dp0;
 
-  rid = id / NC;
-  cid = id % NC;
-  int loop_r = ((nete - nets + 1) + UR*NR - 1)/(UR*NR);
-  int loop_c = (qsize + UC*NC - 1)/(UC*NC);
   int istep_Qtens = qsize*NLEV*NP*NP;
-  int c, r, i, j, k, q, ie, cbeg, cend, rbeg, rend, cn, rn, pos_dp, pos_qdp    \
-      , pos_Qtens_bi, pos_qmax;
+  int c, r, i, j, k, q, ie, k_beg, k_end, q_beg, q_end, k_n, q_n, pos_dp       \
+      , pos_qdp, pos_Qtens_bi, pos_qmax;
 
   pe_get(gl_dp0, dp0, (NLEV*sizeof(double)));
   dma_syn();
 
-  // Divide ie-axis data on the row cpe with loop_r
-  // Divide q-axis data on the cloumn cpe with loop_c
-  for (r = 0; r < loop_r; r++) {
-    rbeg = r*NR*UR + rid*UR;
-    rend = r*NR*UR + (rid + 1)*UR;
-    rend = rend < (nete - nets + 1) ? rend : (nete - nets + 1);
-    rn = rend - rbeg;
-    rn = rn < 0 ? 0 : rn;  // handling boundary issues, removing the case where rn < 0
-    for (ie = 0; ie < rn; ie++) {
-      src_spheremp = gl_spheremp + (rbeg + ie)*step_elem;
-      pe_get(src_spheremp, spheremp, NP*NP*sizeof(double));
+  for (ie = 0; ie < nete - nets + 1; ie++) {
+    // roll the q and k into the id of cpe,
+    // other words is that (q, k) has relationship with id
+    // be careful that the edge of possbilly exception
+    q_beg = KBLK*id/NLEV;
+    q_end = (KBLK*(id + 1))/NLEV;
+    q_end = q_end < qsize ? q_end : qsize;
+    k_beg = KBLK*id - q_beg*NLEV;
+    k_end = KBLK*(id + 1) - q_beg*NLEV;
+    k_end = k_end < NLEV ? k_end : NLEV;
+    k_n = k_end - k_beg;
+    q_n = (k_n == 6 && q_beg != (qsize - 1)) ? 1 : 0;
+    q_n = (id*KBLK > sum_k) ? -1 : q_n;
+
+    src_spheremp = gl_spheremp + ie*step_elem;
+    pe_get(src_spheremp, spheremp, NP*NP*sizeof(double));
+    dma_syn();
+
+    for (q = 0; q <= q_n; q++) {
+      src_Qtens_biharmonic = gl_Qtens_biharmonic + ie*istep_Qtens              \
+          + q_beg*NLEV*NP*NP + (k_beg + q*(q*NLEV - k_beg))*NP*NP;
+      pe_get(src_Qtens_biharmonic, Qtens_biharmonic, (k_n*NP*NP*sizeof(double)));
       dma_syn();
-      for (c = 0; c < loop_c; c++) {
-        cbeg = c*NC*UC + cid*UC;
-        cend = c*NC*UC + (cid + 1)*UC;
-        cend = cend < qsize ? cend : qsize;
-        cn = cend - cbeg;
-        if (cn > 0) {  // if cn < 0, the dma will get exceptional contribution
-          src_Qtens_biharmonic = gl_Qtens_biharmonic + (rbeg + ie)*istep_Qtens + cbeg*qstep_Qten;
-          pe_get(src_Qtens_biharmonic, Qtens_biharmonic, (block*sizeof(double)));
-          dma_syn();
-          for (q = 0; q < cn; q++) {
-            for (k = 0; k < NLEV; k++) {
-              for (j = 0; j < NP; j++) {
-                for (i = 0; i < NP; i++) {
-                  int pos = q*NLEV*NP*NP + k*NP*NP + j*NP + i;
-                  int pos_spheremp = j*NP + i;
-                  Qtens_biharmonic[pos] = -rhs_viss*dt*nu_q*dp0[k]             \
-                      *Qtens_biharmonic[pos]/spheremp[pos_spheremp];
-                }
-              }
-            }
+      for (k = 0; k < k_n; k++) {
+        for (j = 0; j < NP; j++) {
+          for (i = 0; i < NP; i++) {
+            int pos = k*NP*NP + j*NP + i;
+            int pos_spheremp = j*NP + i;
+            pos_dp = (((k_beg + q*(q*NLEV - k_beg)) + k) >= 30)             \
+                ? k : (k_beg + q*(q*NLEV - k_beg)) + k;
+            Qtens_biharmonic[pos] = -rhs_viss*dt*nu_q*dp0[pos_dp]                   \
+                *Qtens_biharmonic[pos]/spheremp[pos_spheremp];
           }
-          pe_put(src_Qtens_biharmonic, Qtens_biharmonic, (cn*NLEV*NP*NP*sizeof(double)));
-          dma_syn();
         }
       }
+      pe_put(src_Qtens_biharmonic, Qtens_biharmonic, (k_n*NP*NP*sizeof(double)));
+      dma_syn();
     }
   }
 #if 0

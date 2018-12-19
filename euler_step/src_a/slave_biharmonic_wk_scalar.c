@@ -261,6 +261,7 @@ void slave_biharmonic_wk_scalar_(param_t *param_s) {
           }  // end loop q
           pe_put(src_qtens, qtens, cn*NLEV*NP*NP*sizeof(double));
           dma_syn();
+          // -------------------- start edgeVpack ---------------------//
           // ------------------------ South ---------------------------//
           for (q = 0; q < cn; q++) {
             //kptr = NLEV*(cbeg + q - 1);
@@ -289,7 +290,6 @@ void slave_biharmonic_wk_scalar_(param_t *param_s) {
           src_buf = gl_buf + is + cbeg*NLEV*NP;
           pe_put(src_buf, buf, cn*NLEV*NP*sizeof(double));
           dma_syn();
-          // -------------------- start edgeVpack ---------------------//
           // ------------------------ East ---------------------------//
           for (q = 0; q < cn; q++) {
             //kptr = NLEV*(cbeg + q - 1);
