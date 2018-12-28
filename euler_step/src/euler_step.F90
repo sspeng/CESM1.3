@@ -303,24 +303,24 @@ interface
   !param_s%step_elem = (loc(elem(nets+1)%state%Qdp) - loc(elem(nets)%state%Qdp))/8
   !call athread_spawn(slave_qdp_time_avg, param_s)
   !call athread_join();
-  !param_s%qdp_s_ptr = loc(elem(nets)%state%Qdp(:,:,:,:,:))
-  !param_s%qdp_leap_ptr = loc(elem((nets+1))%state%Qdp(:,:,:,:,:))
-  !param_s%dp_s_ptr = loc(elem(nets)%derived%dp(:,:,:))
-  !param_s%divdp_proj_s_ptr = loc(elem(nets)%derived%divdp_proj(:,:,:))
-  !param_s%Qtens_biharmonic = loc(Qtens_biharmonic(1,1,1,1,nets))
-  !param_s%qmax = loc(qmax(1,1,nets))
-  !param_s%qmin = loc(qmin(1,1,nets))
-  !param_s%dt = dt
-  !param_s%nets = nets
-  !param_s%nete = nete
-  !param_s%np1_qdp = np1_qdp
-  !param_s%n0_qdp = n0_qdp
-  !param_s%DSSopt = DSSopt
-  !param_s%rhs_multiplier = rhs_multiplier
-  !param_s%qsize = qsize
-  !param_s%qsize_d = qsize_d
-  !call athread_spawn(slave_euler_step, param_s)
-  !call athread_join()
+  param_s%qdp_s_ptr = loc(elem(nets)%state%Qdp(:,:,:,:,:))
+  param_s%qdp_leap_ptr = loc(elem((nets+1))%state%Qdp(:,:,:,:,:))
+  param_s%dp_s_ptr = loc(elem(nets)%derived%dp(:,:,:))
+  param_s%divdp_proj_s_ptr = loc(elem(nets)%derived%divdp_proj(:,:,:))
+  param_s%Qtens_biharmonic = loc(Qtens_biharmonic(1,1,1,1,nets))
+  param_s%qmax = loc(qmax(1,1,nets))
+  param_s%qmin = loc(qmin(1,1,nets))
+  param_s%dt = dt
+  param_s%nets = nets
+  param_s%nete = nete
+  param_s%np1_qdp = np1_qdp
+  param_s%n0_qdp = n0_qdp
+  param_s%DSSopt = DSSopt
+  param_s%rhs_multiplier = rhs_multiplier
+  param_s%qsize = qsize
+  param_s%qsize_d = qsize_d
+  call athread_spawn(slave_euler_step, param_s)
+  call athread_join()
   !param_2d_s%qdp_s_ptr = loc(elem(nets)%state%Qdp(:,:,:,:,:))
   !param_2d_s%qdp_leap_ptr = loc(elem((nets+1))%state%Qdp(:,:,:,:,:))
   !param_2d_s%divdp_proj = loc(elem(nets)%derived%divdp_proj(:,:,:))

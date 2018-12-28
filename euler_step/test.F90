@@ -1,13 +1,15 @@
 program comp
 implicit none
-  real (kind=8) :: a, a1, a2, a3, a4
+  real (kind=8) :: a, a1, a2, a3, a4, aa, bb
   a = 0.5
   a1 = 0.1
   a2 = 2.0
   a3 = 8.3
   a4 = 1.9
   a = MAX(a, a1, a2, a3, a4)
-  print *, a
+  aa = 1.0e24
+  bb = 1.0D24
+  print *, a, "aa:", aa, "bb", bb 
 end program comp
 
 subroutine func(test)

@@ -5,10 +5,10 @@ module dimensions_mod
   integer, parameter, public :: npdg = 0
   integer, parameter, public :: nc = 4
   integer, parameter, public :: nep = 9
-  integer, parameter, public :: nelemd = 43
-  integer, parameter, public :: qsize = 25
+  integer, parameter, public :: nelemd = 3
+  integer, parameter, public :: qsize = 5
   integer, parameter, public :: nlevp = 31
-  integer, parameter, public :: qsize_d = 25
+  integer, parameter, public :: qsize_d = 5
   integer, public  :: max_elements_attached_to_node = 4
   integer, public  :: s_nv = 6
   integer, public  :: max_corner_elem               = 1 !max_elements_attached_to_node-3

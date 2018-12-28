@@ -3,7 +3,7 @@
 #include "ldm_alloc.h"
 #define NP 4
 #define NLEV 30
-#define KBLK 12
+#define KBLK 3
 #define block  (KBLK*NP*NP)
 
 #define get_row_id(rid) asm volatile ("rcsr %0, 1" : "=r"(rid))
@@ -89,22 +89,17 @@ void slave_euler_step_(param_t *param_s) {
     k_end = KBLK*(id + 1) - q_beg*NLEV;
     k_end = k_end < NLEV ? k_end : NLEV;
     k_n = k_end - k_beg;
-    q_n = (k_n == 6 && q_beg != (qsize - 1)) ? 1 : 0;
-    q_n = (id*KBLK > sum_k) ? -1 : q_n;
-    //if (id == 62) printf("q_beg:%d, q_end:%d, k_beg:%d, k_end:%d, k_n:%d\n", q_beg, q_end, k_beg, k_end, k_n);
+    //q_n = (k_n == 6 && q_beg != (qsize - 1)) ? 1 : 0;
+    //q_n = (id*KBLK > sum_k) ? -1 : q_n;
+    q_n = (id*KBLK >= sum_k) ? -1 : 0;
     for (q = 0; q <= q_n; q++) {
-      src_dp_ptr = gl_dp + ie*slice_qdp + (k_beg + q*(q*NLEV - k_beg) - q*NLEV)*NP*NP; // if k over NLEV, k should be reset pointer to start
-      src_divdp_proj_ptr = gl_divdp_proj + ie*slice_qdp                        \
-          + (k_beg + q*(q*NLEV - k_beg) - q*NLEV)*NP*NP; // if k over NLEV, k should be reset pointer to start
-      src_qdp_ptr = src_n0_qdp + ie*slice_qdp + q_beg*NLEV*NP*NP               \
-          + (k_beg + q*(q*NLEV - k_beg))*NP*NP;
-      src_Qtens_bi_ptr = gl_Qtens_bi + ie*istep_Qten + q_beg*NLEV*NP*NP        \
-          + (k_beg + q*(q*NLEV - k_beg))*NP*NP;
-      src_qmax_ptr = gl_qmax + ie*istep_qmax + q_beg*NLEV                      \
-          + (k_beg + q*(q*NLEV - k_beg));
-      src_qmin_ptr = gl_qmin + ie*istep_qmax + q_beg*NLEV                      \
-          + (k_beg + q*(q*NLEV - k_beg));
-      //if (id == 59) printf("%d, %d, %d, %d, %d\n", q_beg, k_beg, (k_beg + q*(q*NLEV - k_beg)), q_n, k_n);
+      //if (id == 10) printf("q:%d, k:%d\n", q_beg, k_beg);
+      src_dp_ptr = gl_dp + ie*slice_qdp + k_beg*NP*NP;
+      src_divdp_proj_ptr = gl_divdp_proj + ie*slice_qdp + k_beg*NP*NP;
+      src_qdp_ptr = src_n0_qdp + ie*slice_qdp + q_beg*NLEV*NP*NP + k_beg*NP*NP;
+      src_Qtens_bi_ptr = gl_Qtens_bi + ie*istep_Qten + q_beg*NLEV*NP*NP + k_beg*NP*NP;
+      src_qmax_ptr = gl_qmax + ie*istep_qmax + q_beg*NLEV + k_beg;
+      src_qmin_ptr = gl_qmin + ie*istep_qmax + q_beg*NLEV + k_beg;
       pe_get(src_dp_ptr, dp, k_n*NP*NP*sizeof(double));
       pe_get(src_divdp_proj_ptr, divdp_proj, k_n*NP*NP*sizeof(double));
       pe_get(src_qdp_ptr, Qdp, k_n*NP*NP*sizeof(double));
