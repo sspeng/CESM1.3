@@ -6,6 +6,7 @@ use hybrid_mod, only: hybrid_t
 use derivative_mod, only: derivative_t
 use hybvcoord_mod, only:hvcoord_t
 implicit none
+  integer, parameter :: R8 = selected_real_kind(12)
   integer :: np1_qdp = 1
   integer :: n0_qdp = 2
   real(kind=real_kind) :: dt = 1
@@ -148,6 +149,7 @@ use hybrid_mod, only: hybrid_t
 use derivative_mod, only: derivative_t
 use edgetype_mod, only       : EdgeBuffer_t
 implicit none
+  integer, parameter :: R8 = selected_real_kind(12)
   integer, intent(in) :: np1_qdp, n0_qdp
   real(kind=real_kind) :: dt
   type(element_t), intent(inout) :: elem(:)
@@ -188,7 +190,24 @@ implicit none
   type(element_t) :: elem_test(43)
   integer :: count = 0
   real (kind=real_kind) :: tol_limiter = 5D-14
+  integer, parameter :: pcnst = 25
+  integer :: top_level = 1
+  integer :: bot_level = 30
+  integer :: lchnk = 1
+  integer :: psetcols = 1
+  integer :: pver = 1
+  integer :: ncol = 13
+  integer :: ixnumice = 1
+  integer :: ixnumliq = 1
+  integer :: ixnumsnow = 1
+  integer :: ixnumrain = 1
 
+  integer :: found(1:pcnst)
+  integer :: ptend_lq(1:pcnst)
+  integer :: nvals(1:pcnst)
+  integer :: iw(1:pcnst)
+  integer :: kw(1:pcnst)
+  real(r8) :: worst(1:pcnst)
   !external :: slave_qdp_time_avg
   !type param_t
   !  integer*8 :: qdp
@@ -231,6 +250,15 @@ implicit none
     integer :: nets, nete, qsize, step_elem
   end type param_rsh_t
   type(param_rsh_t) :: param_rhs_s
+
+  external :: slave_physics_update_1
+  type param_physics_update_t1
+    integer*8 :: state_q, ptend_q, qmin, worst
+    integer*8 :: nvals, iw, kw, found, ptend_lq
+    real(r8) :: dt
+    integer :: pcnst, top_level, bot_level,lchnk, psetcols, pver, ncol, ixnumice, ixnumliq, ixnumsnow, ixnumrain
+  end type param_physics_update_t1
+  type(param_physics_update_t1) :: param_phy_s1
 
   interface
     subroutine biharmonic_wk_scalar(elem, Qtens_biharmonic, deriv, edgeAdv, hybrid, nets, nete)
@@ -289,8 +317,41 @@ interface
       edgeAdv%reverse(i, ie) = .true.
     enddo
   enddo
+  iw(1) = 100
+  kw(1) = 100
+  found(1) = 100
+  nvals(1) = 100
+  worst(1) = 100
+  ptend_lq(:pcnst) = 1
   !call biharmonic_wk_scalar(elem, Qtens_biharmonic, deriv, edgeAdv, hybrid, nets, nete)
-  call edgeVpack(elem, edgeAdv, nets, nete, np1_qdp, DSSopt)
+!  call edgeVpack(elem, edgeAdv, nets, nete, np1_qdp, DSSopt)
+   param_phy_s1%state_q = loc(edgeAdv%buf)
+   param_phy_s1%ptend_q = loc(edgeAdv%buf)
+   param_phy_s1%qmin = loc(qmin)
+   param_phy_s1%worst = loc(worst)
+   param_phy_s1%nvals = loc(nvals)
+   param_phy_s1%iw = loc(iw)
+   param_phy_s1%kw = loc(kw)
+   param_phy_s1%found = loc(found)
+   param_phy_s1%ptend_lq = loc(ptend_lq)
+   param_phy_s1%dt = dt
+   param_phy_s1%pcnst = pcnst
+   param_phy_s1%top_level = top_level
+   param_phy_s1%bot_level = bot_level
+   param_phy_s1%lchnk = lchnk
+   param_phy_s1%psetcols = psetcols
+   param_phy_s1%pver = pver
+   param_phy_s1%ncol = ncol
+   param_phy_s1%ixnumice = ixnumice
+   param_phy_s1%ixnumliq = ixnumliq
+   param_phy_s1%ixnumsnow = ixnumsnow
+   param_phy_s1%ixnumrain = ixnumrain
+  call athread_spawn(slave_physics_update_1, param_phy_s1)
+  call athread_join()
+  do i = 1, pcnst
+    print *, ">>>>>>iw:", iw(i)
+  end do
+
 
   !param_s%qdp = loc(elem(nets)%state%Qdp)
   !param_s%rkstage = rkstage
@@ -303,24 +364,24 @@ interface
   !param_s%step_elem = (loc(elem(nets+1)%state%Qdp) - loc(elem(nets)%state%Qdp))/8
   !call athread_spawn(slave_qdp_time_avg, param_s)
   !call athread_join();
-  param_s%qdp_s_ptr = loc(elem(nets)%state%Qdp(:,:,:,:,:))
-  param_s%qdp_leap_ptr = loc(elem((nets+1))%state%Qdp(:,:,:,:,:))
-  param_s%dp_s_ptr = loc(elem(nets)%derived%dp(:,:,:))
-  param_s%divdp_proj_s_ptr = loc(elem(nets)%derived%divdp_proj(:,:,:))
-  param_s%Qtens_biharmonic = loc(Qtens_biharmonic(1,1,1,1,nets))
-  param_s%qmax = loc(qmax(1,1,nets))
-  param_s%qmin = loc(qmin(1,1,nets))
-  param_s%dt = dt
-  param_s%nets = nets
-  param_s%nete = nete
-  param_s%np1_qdp = np1_qdp
-  param_s%n0_qdp = n0_qdp
-  param_s%DSSopt = DSSopt
-  param_s%rhs_multiplier = rhs_multiplier
-  param_s%qsize = qsize
-  param_s%qsize_d = qsize_d
-  call athread_spawn(slave_euler_step, param_s)
-  call athread_join()
+!  param_s%qdp_s_ptr = loc(elem(nets)%state%Qdp(:,:,:,:,:))
+!  param_s%qdp_leap_ptr = loc(elem((nets+1))%state%Qdp(:,:,:,:,:))
+!  param_s%dp_s_ptr = loc(elem(nets)%derived%dp(:,:,:))
+!  param_s%divdp_proj_s_ptr = loc(elem(nets)%derived%divdp_proj(:,:,:))
+!  param_s%Qtens_biharmonic = loc(Qtens_biharmonic(1,1,1,1,nets))
+!  param_s%qmax = loc(qmax(1,1,nets))
+!  param_s%qmin = loc(qmin(1,1,nets))
+!  param_s%dt = dt
+!  param_s%nets = nets
+!  param_s%nete = nete
+!  param_s%np1_qdp = np1_qdp
+!  param_s%n0_qdp = n0_qdp
+!  param_s%DSSopt = DSSopt
+!  param_s%rhs_multiplier = rhs_multiplier
+!  param_s%qsize = qsize
+!  param_s%qsize_d = qsize_d
+!  call athread_spawn(slave_euler_step, param_s)
+!  call athread_join()
   !param_2d_s%qdp_s_ptr = loc(elem(nets)%state%Qdp(:,:,:,:,:))
   !param_2d_s%qdp_leap_ptr = loc(elem((nets+1))%state%Qdp(:,:,:,:,:))
   !param_2d_s%divdp_proj = loc(elem(nets)%derived%divdp_proj(:,:,:))

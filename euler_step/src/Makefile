@@ -5,6 +5,7 @@ OBJS = kinds.o hybrid_mod.o physical_constants.o control_mod.o dimensions_mod.o\
 	  slave_biharmonic_wk_scalar_2.o slave_qdp_time_avg.o  slave_rhs_multiplier.o\
 		slave_compute_overlap.o slave_update_qdp.o slave_edgeSpack_es.o            \
 		slave_edgeSunpack_es.o slave_edgeVpack_es.o slave_edgeVunpack_es.o         \
+		slave_qneg3.o slave_physics_update_1.o \
 		euler_step.o
 all: euler_step
 euler_step : $(OBJS)
@@ -16,6 +17,7 @@ euler_step : $(OBJS)
 			euler_step.o slave_qdp_time_avg.o slave_rhs_multiplier.o                 \
 			slave_compute_overlap.o slave_update_qdp.o slave_edgeSpack_es.o          \
 			slave_edgeSunpack_es.o slave_edgeVpack_es.o slave_edgeVunpack_es.o       \
+			slave_qneg3.o slave_physics_update_1.o \
 	    -o ../bin/euler_step
 element_mod.o: element_mod.F90
 	sw5f90 -host -c element_mod.F90
@@ -39,6 +41,8 @@ counter.o: counter.c
 	sw5cc -host -c counter.c
 limiter_optim_iter_full.o: limiter_optim_iter_full.F90
 	sw5f90 -slave -c limiter_optim_iter_full.F90 -OPT:IEEE_arithmetic=2
+slave_qneg3.o: slave_qneg3.F90
+	sw5f90 -slave -c slave_qneg3.F90 -OPT:IEEE_arithmetic=2
 slave_euler_step.o: slave_euler_step.c dma_macros.h ldm_alloc.h
 	sw5cc -slave -c slave_euler_step.c -msimd
 slave_euler_v.o: slave_euler_v.c dma_macros.h ldm_alloc.h
@@ -65,6 +69,8 @@ slave_edgeSunpack_es.o : slave_edgeSunpack_es.c
 	sw5cc -slave -c slave_edgeSunpack_es.c -msimd
 slave_edgeVpack_es.o : slave_edgeVpack_es.c
 	sw5cc -slave -c slave_edgeVpack_es.c -msimd
+slave_physics_update_1.o : slave_physics_update_1.c
+	sw5cc -slave -c slave_physics_update_1.c -msimd
 slave_edgeVunpack_es.o : slave_edgeVunpack_es.c
 	sw5cc -slave -c slave_edgeVunpack_es.c -msimd
 euler_step.o: euler_step.F90

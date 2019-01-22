@@ -3,31 +3,23 @@
 #include "ldm_alloc.h"
 #define NP 4
 #define NLEV 30
-#define KBLK 3
+#define KBLK 12
 #define block  (KBLK*NP*NP)
 
-#define get_row_id(rid) asm volatile ("rcsr %0, 1" : "=r"(rid))
-#define get_col_id(cid) asm volatile ("rcsr %0, 2" : "=r"(cid))
-#define REG_PUTR(var, dst) asm volatile ("putr %0,%1"::"r"(var),"r"(dst))
-#define REG_PUTC(var, dst) asm volatile ("putc %0,%1"::"r"(var),"r"(dst))
-#define REG_GETR(var) asm volatile ("getr %0":"=r"(var))
-#define REG_GETC(var) asm volatile ("getc %0":"=r"(var))
 #define MAX(val1, val2) ((val1) > (val2) ? (val1) : (val2))
 #define MIN(val1, val2) ((val1) < (val2) ? (val1) : (val2))
 
 typedef struct {
-  double *qdp_s, *qdp_leap, *dp, *divdp_proj, *Qtens_biharmonic                \
-      , *Qtens_biharmonic_temp, *qmax, *qmin, *qmin_temp;
+  double *state_q, *ptend_q, *qmin, *worst;
+  int *nvals, *iw, *kw, *found
   double dt;
-  int  nets, nete, np1_qdp, n0_qdp, DSSopt, rhs_multiplier, qsize, qsize_d;
+  int lq, pcnst, top_level, bot_level, lchnk, psetcols, pver, ncol, ixnumice  \
+      , ixnumliq, ixnumsnow, ixnumrain;
 } param_t;
 
-void slave_euler_step_(param_t *param_s) {
+void slave_physics_update_1_(param_t *param_s) {
   volatile int id = athread_get_id(-1);
   volatile unsigned long get_reply, put_reply;
-  volatile int cid, rid;
-  get_col_id(cid);
-  get_row_id(rid);
   dma_init();
   ldm_alloc_init();
 
@@ -39,10 +31,8 @@ void slave_euler_step_(param_t *param_s) {
   double *gl_dp = param_d.dp;
   double *gl_divdp_proj = param_d.divdp_proj;
   double *gl_Qtens_bi = param_d.Qtens_biharmonic;
-  double *gl_Qtens_bi_temp = param_d.Qtens_biharmonic_temp;
   double *gl_qmax = param_d.qmax;
   double *gl_qmin = param_d.qmin;
-  double *gl_qmin_temp = param_d.qmin_temp;
   double dt = param_d.dt;
   int nets = param_d.nets;
   int nete = param_d.nete;
@@ -80,7 +70,7 @@ void slave_euler_step_(param_t *param_s) {
   double *src_n0_qdp = (double *)(gl_qdp_s) + (n0_qdp - 1)*qsize_d*NLEV*NP*NP;
 
   double *src_qdp_ptr, *src_dp_ptr,  *src_divdp_proj_ptr, *src_Qtens_bi_ptr    \
-      , *src_qmax_ptr, *src_qmin_ptr, *src_Qtens_bi_temp_ptr, *src_qmin_temp_ptr;
+      , *src_qmax_ptr, *src_qmin_ptr;
 
   int i, j, k, q, ie, k_beg, k_end, k_n, q_beg, q_end, q_n, pos;
 
@@ -92,19 +82,22 @@ void slave_euler_step_(param_t *param_s) {
     k_end = KBLK*(id + 1) - q_beg*NLEV;
     k_end = k_end < NLEV ? k_end : NLEV;
     k_n = k_end - k_beg;
-    //q_n = (k_n == 6 && q_beg != (qsize - 1)) ? 1 : 0;
-    //q_n = (id*KBLK > sum_k) ? -1 : q_n;
-    q_n = (id*KBLK >= sum_k) ? -1 : 0;
+    q_n = (k_n == 6 && q_beg != (qsize - 1)) ? 1 : 0;
+    q_n = (id*KBLK > sum_k) ? -1 : q_n;
+    //if (id == 62) printf("q_beg:%d, q_end:%d, k_beg:%d, k_end:%d, k_n:%d\n", q_beg, q_end, k_beg, k_end, k_n);
     for (q = 0; q <= q_n; q++) {
-      //if (id == 10) printf("q:%d, k:%d\n", q_beg, k_beg);
-      src_dp_ptr = gl_dp + ie*slice_qdp + k_beg*NP*NP;
-      src_divdp_proj_ptr = gl_divdp_proj + ie*slice_qdp + k_beg*NP*NP;
-      src_qdp_ptr = src_n0_qdp + ie*slice_qdp + q_beg*NLEV*NP*NP + k_beg*NP*NP;
-      src_Qtens_bi_ptr = gl_Qtens_bi + ie*istep_Qten + q_beg*NLEV*NP*NP + k_beg*NP*NP;
-      src_qmax_ptr = gl_qmax + ie*istep_qmax + q_beg*NLEV + k_beg;
-      src_qmin_ptr = gl_qmin + ie*istep_qmax + q_beg*NLEV + k_beg;
-      src_qmin_temp_ptr = gl_qmin_temp + ie*istep_qmax + q_beg*NLEV + k_beg;
-      src_Qtens_bi_temp_ptr = gl_Qtens_bi_temp + ie*istep_Qten + q_beg*NLEV*NP*NP + k_beg*NP*NP;
+      src_dp_ptr = gl_dp + ie*slice_qdp + (k_beg + q*(q*NLEV - k_beg) - q*NLEV)*NP*NP; // if k over NLEV, k should be reset pointer to start
+      src_divdp_proj_ptr = gl_divdp_proj + ie*slice_qdp                        \
+          + (k_beg + q*(q*NLEV - k_beg) - q*NLEV)*NP*NP; // if k over NLEV, k should be reset pointer to start
+      src_qdp_ptr = src_n0_qdp + ie*slice_qdp + q_beg*NLEV*NP*NP               \
+          + (k_beg + q*(q*NLEV - k_beg))*NP*NP;
+      src_Qtens_bi_ptr = gl_Qtens_bi + ie*istep_Qten + q_beg*NLEV*NP*NP        \
+          + (k_beg + q*(q*NLEV - k_beg))*NP*NP;
+      src_qmax_ptr = gl_qmax + ie*istep_qmax + q_beg*NLEV                      \
+          + (k_beg + q*(q*NLEV - k_beg));
+      src_qmin_ptr = gl_qmin + ie*istep_qmax + q_beg*NLEV                      \
+          + (k_beg + q*(q*NLEV - k_beg));
+      //if (id == 59) printf("%d, %d, %d, %d, %d\n", q_beg, k_beg, (k_beg + q*(q*NLEV - k_beg)), q_n, k_n);
       pe_get(src_dp_ptr, dp, k_n*NP*NP*sizeof(double));
       pe_get(src_divdp_proj_ptr, divdp_proj, k_n*NP*NP*sizeof(double));
       pe_get(src_qdp_ptr, Qdp, k_n*NP*NP*sizeof(double));
@@ -140,11 +133,9 @@ void slave_euler_step_(param_t *param_s) {
           qmax[k] = qmax_val[k];
         }
       }
-      pe_put(src_Qtens_bi_temp_ptr, Qtens_biharmonic, k_n*NP*NP*sizeof(double));
-      //pe_put(src_Qtens_bi_ptr, Qtens_biharmonic, k_n*NP*NP*sizeof(double));
-      //pe_put(src_qmax_ptr, qmax, k_n*sizeof(double));
-      //pe_put(src_qmin_ptr, qmin, k_n*sizeof(double));
-      pe_put(src_qmin_temp_ptr, qmin, k_n*sizeof(double));
+      pe_put(src_Qtens_bi_ptr, Qtens_biharmonic, k_n*NP*NP*sizeof(double));
+      pe_put(src_qmax_ptr, qmax, k_n*sizeof(double));
+      pe_put(src_qmin_ptr, qmin, k_n*sizeof(double));
       dma_syn();
     }
   }
